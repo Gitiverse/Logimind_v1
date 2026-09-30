@@ -49,14 +49,19 @@ Design your own clinical forms, log cases against patients, track the procedures
 - Full JSON backup and safe restore that never deletes what is already on the phone
 - Daily automatic backup inside the app and a reminder to export a copy
 
-**AI case summaries**
-- Offline summary on the phone, or Google Gemini with your own API key (asks before sending any data)
+**AI summaries**
+- Three purposes, chosen automatically from the selected logs: **Case summary**, **Patient timeline** and **Logbook** (procedures performed by me / assisted / role not recorded, with supervisors and totals)
+- Works offline on the phone, or with Google Gemini using your own API key (Fast or Better model)
+- De-identified: patient names, MRNs, phone numbers and entry titles are never sent; patients become "Patient 1" and the real name is shown only on your phone. Free-text answers are sent as written
+- Strict rules: only recorded data, "Not recorded" instead of guesses, roles kept exactly; every summary is marked as an AI draft to check
+- "What will be sent?" preview, copy and share
 
 **Privacy and comfort**
 - Works fully offline; no account needed
 - Optional app lock with the phone's PIN or fingerprint
 - API key stored encrypted with the Android Keystore
 - Light, dark or follow-the-phone theme
+- Large, rounded icons and touch targets; readable at large system text sizes
 
 ## Upgrading from version 1.0
 
@@ -93,6 +98,7 @@ The unit tests (Robolectric) cover the things that protect users' data:
 - old (v1) and new (v2) backups restore without losing anything
 - undo after delete, patient edits, CSV layout
 - show/hide rules, procedure answers and date filters
+- AI summaries: nothing identifying is sent, roles are never swapped, every procedure is listed, hidden questions stay out
 
 ## Project structure
 
