@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- In-app logo: the launcher mark on a rounded gradient tile (same shapes as the app icon). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M26,0h56a26,26 0 0 1 26,26v56a26,26 0 0 1 -26,26h-56a26,26 0 0 1 -26,-26v-56a26,26 0 0 1 26,-26z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="108" android:endY="108"
+                android:startColor="#1E88E5" android:endColor="#0A4F99"/>
+        </aapt:attr>
+    </path>
+    <group android:scaleX="1.3" android:scaleY="1.3" android:pivotX="53" android:pivotY="54">
+    <!-- Clipboard board -->
+    <path android:fillColor="#FFFFFF" android:pathData="M41,32h24a5,5 0 0 1 5,5v38a5,5 0 0 1 -5,5h-24a5,5 0 0 1 -5,-5v-38a5,5 0 0 1 5,-5z"/>
+    <!-- Clip -->
+    <path android:fillColor="#CFE3F7" android:pathData="M47,27h12a3,3 0 0 1 3,3v6a3,3 0 0 1 -3,3h-12a3,3 0 0 1 -3,-3v-6a3,3 0 0 1 3,-3z"/>
+    <path android:fillColor="#0A5FAE" android:pathData="M50.5,30h5a1.5,1.5 0 0 1 0,3h-5a1.5,1.5 0 0 1 0,-3z"/>
+    <!-- Log lines -->
+    <path android:fillColor="#A9C4E0" android:pathData="M42.5,45h21a1.75,1.75 0 0 1 0,3.5h-21a1.75,1.75 0 0 1 0,-3.5z"/>
+    <path android:fillColor="#A9C4E0" android:pathData="M42.5,53h21a1.75,1.75 0 0 1 0,3.5h-21a1.75,1.75 0 0 1 0,-3.5z"/>
+    <path android:fillColor="#A9C4E0" android:pathData="M42.5,61h11a1.75,1.75 0 0 1 0,3.5h-11a1.75,1.75 0 0 1 0,-3.5z"/>
+    <!-- Medical cross badge -->
+    <path android:fillColor="#FFFFFF" android:pathData="M64,57a11.5,11.5 0 1 1 0,23a11.5,11.5 0 1 1 0,-23z"/>
+    <path android:fillColor="#12A594" android:pathData="M64,59.5a9,9 0 1 1 0,18a9,9 0 1 1 0,-18z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M62.5,63h3v4h4v3h-4v4h-3v-4h-4v-3h4z"/>
+    </group>
+</vector>

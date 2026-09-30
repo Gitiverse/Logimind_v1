@@ -39,6 +39,8 @@ import com.example.data.service.SubscriptionManager
 import com.example.data.service.SubscriptionTier
 import com.example.data.service.SyncPlaceholderService
 import com.example.data.service.SyncState
+import com.example.ui.theme.BrandTheme
+import com.example.ui.theme.ThemeMode
 import com.example.ui.viewmodel.FormBuilderViewModel
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -69,6 +71,26 @@ fun HomeScreen(
     }
 
     var logToDelete by remember { mutableStateOf<FormEntry?>(null) }
+    var templateToDelete by remember { mutableStateOf<Pair<FormTemplate, Int>?>(null) }
+    var patientToDelete by remember { mutableStateOf<Patient?>(null) }
+    var patientToEdit by remember { mutableStateOf<Patient?>(null) }
+    var showLogSearch by remember { mutableStateOf(false) }
+    var logSearchQuery by remember { mutableStateOf("") }
+    // Searchable text per entry: title, patient, MRN, template and every answer value.
+    val entrySearchText = remember(entries, patients, fieldLabelMap) {
+        val mrnByPatient = patients.associate { it.uid to it.medicalId }
+        entries.associate { e ->
+            val answerText = try {
+                val o = JSONObject(e.answersJson)
+                o.keys().asSequence().joinToString(" ") { k -> o.optString(k) }
+            } catch (ex: Exception) {
+                ""
+            }
+            e.uid to listOf(e.title, e.patientName ?: "", mrnByPatient[e.patientId] ?: "", e.templateName ?: "", answerText)
+                .joinToString(" ")
+                .lowercase()
+        }
+    }
     var showSelectLogsForAiDialog by remember { mutableStateOf(false) }
     var selectedLogIdsForAiSummary by remember { mutableStateOf(setOf<String>()) }
     var selectedEntriesForAiSummary by remember { mutableStateOf<List<FormEntry>>(emptyList()) }
@@ -112,11 +134,40 @@ fun HomeScreen(
     var restoreMessage by remember { mutableStateOf<String?>(null) }
     var showTextRestoreDialog by remember { mutableStateOf(false) }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    // Short "Deleted — Undo" message after deletes.
+    val showUndo: (String, () -> Unit) -> Unit = { message, undo ->
+        scope.launch {
+            val result = snackbarHostState.showSnackbar(message, actionLabel = "Undo", duration = SnackbarDuration.Long)
+            if (result == SnackbarResult.ActionPerformed) undo()
+        }
+    }
+    val showBackupReminder by viewModel.showBackupReminder.collectAsState()
+    val pinnedTemplates by viewModel.pinnedTemplates.collectAsState()
+    val fieldOrder by viewModel.fieldOrder.collectAsState()
+    LaunchedEffect(showBackupReminder) {
+        if (showBackupReminder) {
+            val result = snackbarHostState.showSnackbar(
+                "No backup exported in the last 7 days. Save one off this phone.",
+                actionLabel = "Back up",
+                withDismissAction = true,
+                duration = SnackbarDuration.Indefinite
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                syncHubTab = 2
+                showSyncHubDialog = true
+            } else {
+                viewModel.snoozeBackupReminder()
+            }
+        }
+    }
+
     // AI Panel interactive state controllers
     var selectedAiStyle by remember { mutableStateOf("short") }
     var selectedAiProvider by remember { mutableStateOf("local_offline") }
     var aiGeneratedSummaryText by remember { mutableStateOf("") }
     var aiIsSynthesizing by remember { mutableStateOf(false) }
+    var showCloudAiConsentFor by remember { mutableStateOf<String?>(null) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -127,7 +178,9 @@ fun HomeScreen(
             run {
                 val prefs = context.getSharedPreferences("logimind_prefs", android.content.Context.MODE_PRIVATE)
                 val savedStr = prefs.getString("dashboard_tile_order", "patients,new_entry,templates,sync,my_procedures")
-                savedStr?.split(",")?.filter { it.isNotBlank() } ?: listOf("patients", "new_entry", "templates", "sync", "my_procedures")
+                val allTiles = listOf("patients", "new_entry", "templates", "sync", "my_procedures")
+                val saved = savedStr?.split(",")?.filter { it in allTiles }?.distinct() ?: emptyList()
+                saved + allTiles.filter { it !in saved }
             }
         )
     }
@@ -198,7 +251,7 @@ fun HomeScreen(
                     val json = stream.bufferedReader().readText()
                     viewModel.restoreBackup(
                         jsonString = json,
-                        onSuccess = { restoreMessage = "EMR Database elements successfully restored!" },
+                        onSuccess = { report -> restoreMessage = "Backup restored. Nothing already on this phone was deleted.\n\n$report" },
                         onError = { error -> restoreMessage = "Restore failed: $error" }
                     )
                 }
@@ -208,18 +261,28 @@ fun HomeScreen(
         }
     }
 
+    // The summary runs only on an explicit request (Generate, "AI Summary" on an entry,
+    // "Summarize All", or confirming a selection) - never just because a style or engine
+    // chip changed, since cloud engines receive patient data.
+    var aiRunRequest by remember { mutableIntStateOf(0) }
+
     // Auto-sync single entry to the lists
     LaunchedEffect(selectedEntryForAiSummary) {
         val entry = selectedEntryForAiSummary
         if (entry != null) {
             selectedEntriesForAiSummary = listOf(entry)
+            aiRunRequest++
         } else {
             selectedEntriesForAiSummary = emptyList()
         }
     }
 
-    LaunchedEffect(selectedEntriesForAiSummary, selectedAiStyle, selectedAiProvider, subscriptionTier) {
-        if (selectedEntriesForAiSummary.isNotEmpty()) {
+    LaunchedEffect(selectedEntriesForAiSummary) {
+        aiGeneratedSummaryText = ""
+    }
+
+    LaunchedEffect(aiRunRequest) {
+        if (aiRunRequest > 0 && selectedEntriesForAiSummary.isNotEmpty()) {
             aiIsSynthesizing = true
             aiGeneratedSummaryText = "Normalizing dynamic EMR schema fields and activating AI pipeline..."
             
@@ -231,7 +294,7 @@ fun HomeScreen(
             try {
                 // Ensure all complex JSON parsing and networking tasks run on the background Dispatcher
                 val resultSummary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    val normalized = com.example.data.service.AiSummaryService.normalizeLogs(currentEntries)
+                    val normalized = com.example.data.service.AiSummaryService.normalizeLogs(currentEntries, fieldLabelMap)
                     val provider = com.example.data.service.AiSummaryService.providers.find { it.id == currentProvider }
                     if (provider != null) {
                         if (provider.isPremiumOnly && currentTier == SubscriptionTier.FREE) {
@@ -267,134 +330,92 @@ fun HomeScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            Surface(
-                tonalElevation = 2.dp,
-                shadowElevation = 2.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-
-                    // LEFT SIDE
+            val isPremium = subscriptionTier == SubscriptionTier.PREMIUM
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                Column {
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // LOGO + TITLE
+                        androidx.compose.foundation.Image(
+                            painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_logo),
+                            contentDescription = "LogiMind logo",
+                            modifier = Modifier.size(44.dp)
+                        )
 
-                        // APP ICON
-                        Box(
-                            modifier = Modifier
-                                .size(52.dp)
-                                .clip(RoundedCornerShape(14.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            androidx.compose.foundation.Image(
-                                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_launcher_foreground),
-                                contentDescription = "App Logomark",
-                                modifier = Modifier
-                                    .size(52.dp)
-                                    .graphicsLayer(scaleX = 1.25f, scaleY = 1.25f),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                            )
-                        }
+                        Spacer(modifier = Modifier.width(12.dp))
 
-                        Spacer(modifier = Modifier.width(14.dp))
-
-                        // TITLE SECTION
-                        Column(
-                            verticalArrangement = Arrangement.Center
-                        ) {
-
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "LogiMind",
-                                fontSize = 24.sp,
+                                fontSize = 22.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = (-0.5).sp,
-                                color = MaterialTheme.colorScheme.onSurface
+                                letterSpacing = (-0.4).sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
                             )
-
-                            Spacer(modifier = Modifier.height(2.dp))
-
                             Text(
-                                text = "Clinical Logbook System",
+                                text = "Clinical Logbook",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // RIGHT PORTION WITH SETTINGS GEAR AND BADGE
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        IconButton(onClick = { showGeminiApiSettingsDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Gemini API Settings",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
+                                color = MaterialTheme.colorScheme.secondary,
+                                maxLines = 1
                             )
                         }
 
-                        // RIGHT BADGE
+                        // SETTINGS + PLAN BADGE (same height and shape)
                         Surface(
-                            onClick = { SubscriptionManager.toggleSubscription() },
+                            onClick = { showGeminiApiSettingsDialog = true },
                             shape = RoundedCornerShape(50),
-                            color =
-                            if (subscriptionTier == SubscriptionTier.PREMIUM)
-                                Color(0xFFFFF3E0)
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = "Settings",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Surface(
+                            onClick = { showPremiumUpsellDialog = true },
+                            shape = RoundedCornerShape(50),
+                            color = if (isPremium) BrandTheme.colors.premiumContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.height(38.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(
-                                    horizontal = 14.dp,
-                                    vertical = 8.dp
-                                ),
+                                modifier = Modifier.padding(horizontal = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-
+                                val badgeColor = if (isPremium) BrandTheme.colors.onPremiumContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                 Icon(
-                                    imageVector =
-                                    if (subscriptionTier == SubscriptionTier.PREMIUM)
-                                        Icons.Default.Star
-                                    else
-                                        Icons.Default.Lock,
+                                    imageVector = if (isPremium) Icons.Default.Star else Icons.Default.Lock,
                                     contentDescription = null,
-                                    tint =
-                                    if (subscriptionTier == SubscriptionTier.PREMIUM)
-                                        Color(0xFFFF9800)
-                                    else
-                                        MaterialTheme.colorScheme.outline,
+                                    tint = badgeColor,
                                     modifier = Modifier.size(16.dp)
                                 )
-
-                                Spacer(modifier = Modifier.width(6.dp))
-
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text =
-                                    if (subscriptionTier == SubscriptionTier.PREMIUM)
-                                        "PRO"
-                                    else
-                                        "FREE",
-                                    fontSize = 11.sp,
+                                    text = if (isPremium) "PRO" else "FREE",
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color =
-                                    if (subscriptionTier == SubscriptionTier.PREMIUM)
-                                        Color(0xFFFF9800)
-                                    else
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    letterSpacing = 0.5.sp,
+                                    color = badgeColor
                                 )
                             }
                         }
                     }
+                    HorizontalDivider(thickness = 1.dp, color = BrandTheme.colors.headerDivider)
                 }
             }
         }
@@ -493,11 +514,11 @@ fun HomeScreen(
                                             }
                                             val tileBadge = if (id == "my_procedures") "AGGREGATED" else null
                                             val tileColor = when (id) {
-                                                "patients" -> Color(0xFF2196F3)
-                                                "new_entry" -> Color(0xFF4CAF50)
-                                                "templates" -> Color(0xFFFF9800)
-                                                "sync" -> Color(0xFF9C27B0)
-                                                else -> Color(0xFFE91E63)
+                                                "patients" -> BrandTheme.colors.tilePatients
+                                                "new_entry" -> BrandTheme.colors.tileNewEntry
+                                                "templates" -> BrandTheme.colors.tileTemplates
+                                                "sync" -> BrandTheme.colors.tileSync
+                                                else -> BrandTheme.colors.tileProcedures
                                             }
                                             val tileClick = {
                                                 when (id) {
@@ -638,6 +659,20 @@ fun HomeScreen(
                                             )
                                         }
                                     }
+                                    IconButton(
+                                        onClick = {
+                                            showLogSearch = !showLogSearch
+                                            if (!showLogSearch) logSearchQuery = ""
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (showLogSearch) Icons.Default.SearchOff else Icons.Default.Search,
+                                            contentDescription = if (showLogSearch) "Close search" else "Search logs",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                     TextButton(onClick = { viewAllEntries = !viewAllEntries }) {
                                         Text(
                                             text = if (viewAllEntries) "Collapse" else "View All (${entries.size})",
@@ -647,6 +682,25 @@ fun HomeScreen(
                                     }
                                 }
 
+                                if (showLogSearch) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    OutlinedTextField(
+                                        value = logSearchQuery,
+                                        onValueChange = { logSearchQuery = it },
+                                        placeholder = { Text("Search patient, MRN, procedure, answer...") },
+                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                        trailingIcon = {
+                                            if (logSearchQuery.isNotEmpty()) {
+                                                IconButton(onClick = { logSearchQuery = "" }) {
+                                                    Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                                                }
+                                            }
+                                        },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -672,58 +726,10 @@ fun HomeScreen(
                             }
                         }
 
+                        val searchTerms = logSearchQuery.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
                         val filteredEntries = entries.filter { entry ->
-                            val entryDateMs = entry.createdAt
-                            
-                            val startOk = if (recentLogsStartDate != null) {
-                                val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                                    timeInMillis = recentLogsStartDate!!
-                                    set(java.util.Calendar.HOUR_OF_DAY, 0)
-                                    set(java.util.Calendar.MINUTE, 0)
-                                    set(java.util.Calendar.SECOND, 0)
-                                    set(java.util.Calendar.MILLISECOND, 0)
-                                }
-                                val entryCal = java.util.Calendar.getInstance().apply {
-                                    timeInMillis = entryDateMs
-                                }
-                                entryCal.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                                val entryCompCal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                                    set(java.util.Calendar.YEAR, entryCal.get(java.util.Calendar.YEAR))
-                                    set(java.util.Calendar.MONTH, entryCal.get(java.util.Calendar.MONTH))
-                                    set(java.util.Calendar.DAY_OF_MONTH, entryCal.get(java.util.Calendar.DAY_OF_MONTH))
-                                    set(java.util.Calendar.HOUR_OF_DAY, 0)
-                                    set(java.util.Calendar.MINUTE, 0)
-                                    set(java.util.Calendar.SECOND, 0)
-                                    set(java.util.Calendar.MILLISECOND, 0)
-                                }
-                                entryCompCal.timeInMillis >= calendar.timeInMillis
-                            } else true
-
-                            val endOk = if (recentLogsEndDate != null) {
-                                val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                                    timeInMillis = recentLogsEndDate!!
-                                    set(java.util.Calendar.HOUR_OF_DAY, 23)
-                                    set(java.util.Calendar.MINUTE, 59)
-                                    set(java.util.Calendar.SECOND, 59)
-                                    set(java.util.Calendar.MILLISECOND, 999)
-                                }
-                                val entryCal = java.util.Calendar.getInstance().apply {
-                                    timeInMillis = entryDateMs
-                                }
-                                entryCal.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                                val entryCompCal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                                    set(java.util.Calendar.YEAR, entryCal.get(java.util.Calendar.YEAR))
-                                    set(java.util.Calendar.MONTH, entryCal.get(java.util.Calendar.MONTH))
-                                    set(java.util.Calendar.DAY_OF_MONTH, entryCal.get(java.util.Calendar.DAY_OF_MONTH))
-                                    set(java.util.Calendar.HOUR_OF_DAY, 0)
-                                    set(java.util.Calendar.MINUTE, 0)
-                                    set(java.util.Calendar.SECOND, 0)
-                                    set(java.util.Calendar.MILLISECOND, 0)
-                                }
-                                entryCompCal.timeInMillis <= calendar.timeInMillis
-                            } else true
-
-                            startOk && endOk
+                            isWithinDayRange(entry.createdAt, recentLogsStartDate, recentLogsEndDate) &&
+                                searchTerms.all { term -> entrySearchText[entry.uid]?.contains(term) == true }
                         }
 
                         // Selection Action Bar Helper
@@ -784,7 +790,7 @@ fun HomeScreen(
                             }
                         }
 
-                        val displayedEntries = if (viewAllEntries) filteredEntries else filteredEntries.take(3)
+                        val displayedEntries = if (viewAllEntries || searchTerms.isNotEmpty()) filteredEntries else filteredEntries.take(3)
 
                         if (entries.isEmpty()) {
                             item {
@@ -828,7 +834,7 @@ fun HomeScreen(
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Text(
-                                            "No entries match this filter range",
+                                            if (searchTerms.isNotEmpty()) "No entries match your search" else "No entries match this filter range",
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1097,6 +1103,7 @@ fun HomeScreen(
                                                                 if (chosenList.isNotEmpty()) {
                                                                     selectedEntryForAiSummary = null
                                                                     selectedEntriesForAiSummary = chosenList
+                                                                    aiRunRequest++
                                                                 }
                                                             },
                                                             shape = RoundedCornerShape(8.dp),
@@ -1201,17 +1208,21 @@ fun HomeScreen(
                                                     modifier = Modifier.fillMaxWidth(),
                                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
+                                                    // GPT-4 and Claude are not connected yet, so they are not offered.
                                                     val providers = listOf(
                                                         "local_offline" to "LogiMind Local",
-                                                        "gemini_pro" to "Gemini 1.5",
-                                                        "openai_gpt4" to "GPT-4",
-                                                        "claude_sonnet" to "Claude 3.5"
+                                                        "gemini_pro" to "Gemini"
                                                     )
                                                     providers.forEach { (id, label) ->
                                                         val isProvSel = selectedAiProvider == id
                                                         val isPremium = id != "local_offline"
                                                         Surface(
-                                                            onClick = { selectedAiProvider = id },
+                                                            onClick = {
+                                                                // Cloud engines receive patient data; ask once before the first use.
+                                                                val consented = context.getSharedPreferences("logimind_prefs", android.content.Context.MODE_PRIVATE)
+                                                                    .getBoolean("ai_consent_v1", false)
+                                                                if (id == "gemini_pro" && !consented) showCloudAiConsentFor = id else selectedAiProvider = id
+                                                            },
                                                             shape = RoundedCornerShape(8.dp),
                                                             color = if (isProvSel) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surfaceVariant,
                                                             border = if (isProvSel) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
@@ -1245,6 +1256,17 @@ fun HomeScreen(
                                             }
 
                                             Spacer(modifier = Modifier.height(4.dp))
+
+                                            Button(
+                                                onClick = { aiRunRequest++ },
+                                                enabled = !aiIsSynthesizing,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(10.dp)
+                                            ) {
+                                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(if (aiGeneratedSummaryText.isBlank()) "Generate Summary" else "Regenerate Summary", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
 
                                             // Synthetic or live AI Summary Output Panel
                                             Card(
@@ -1399,9 +1421,10 @@ fun HomeScreen(
                                 )
                             }
                         } else {
-                            items(filteredPatients) { pat ->
+                            // Keyed by patient: position-based state showed one patient's logs on another's card.
+                            items(filteredPatients, key = { it.uid }) { pat ->
                                 var detailsExpanded by remember { mutableStateOf(false) }
-                                val patHistories = remember(entries) { entries.filter { it.patientId == pat.uid } }
+                                val patHistories = remember(entries, pat.uid) { entries.filter { it.patientId == pat.uid } }
 
                                 Card(
                                     modifier = Modifier
@@ -1455,7 +1478,9 @@ fun HomeScreen(
                                                 DemographicRow(label = "Primary Contact", value = pat.phone ?: "Not Recorded")
                                                 DemographicRow(label = "Age Bracket", value = pat.age ?: "Not Recorded")
                                                 DemographicRow(label = "Insurance Coverage", value = pat.insurance ?: "Not Recorded")
-                                                DemographicRow(label = "Drug Allergy Alert", value = pat.notes ?: "Not Recorded")
+                                                // "notes" holds the clinical background question; allergies live in customAnswersJson.
+                                                val intakeLabels = customIntakeFields.associate { it.id to it.label }
+                                                DemographicRow(label = intakeLabels["notes"] ?: "Clinical Background", value = pat.notes ?: "Not Recorded")
 
                                                 if (!pat.customAnswersJson.isNullOrBlank()) {
                                                     val customPairs = remember(pat.customAnswersJson) {
@@ -1472,8 +1497,8 @@ fun HomeScreen(
                                                         }
                                                         list
                                                     }
-                                                    customPairs.forEach { (label, value) ->
-                                                        DemographicRow(label = label, value = value)
+                                                    customPairs.forEach { (key, value) ->
+                                                        DemographicRow(label = intakeLabels[key] ?: intakeKeyFallbackLabel(key), value = value)
                                                     }
                                                 }
                                             }
@@ -1503,8 +1528,13 @@ fun HomeScreen(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 horizontalArrangement = Arrangement.End
                                             ) {
+                                                TextButton(onClick = { patientToEdit = pat }) {
+                                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("Edit Profile", fontSize = 11.sp)
+                                                }
                                                 TextButton(
-                                                    onClick = { viewModel.deletePatient(pat) },
+                                                    onClick = { patientToDelete = pat },
                                                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                                                 ) {
                                                     Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -1567,7 +1597,7 @@ fun HomeScreen(
                                 )
                             }
                         } else {
-                            items(templates) { template ->
+                            items(templates, key = { it.uid }) { template ->
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1598,9 +1628,13 @@ fun HomeScreen(
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = "Tap to open Options Dashboard",
+                                                text = when {
+                                                    !template.isActive -> "Archived • hidden from New Entry"
+                                                    template.uid in pinnedTemplates -> "★ Pinned • Tap to open Options Dashboard"
+                                                    else -> "Tap to open Options Dashboard"
+                                                },
                                                 fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.secondary
+                                                color = if (template.isActive) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline
                                             )
                                         }
                                         Icon(
@@ -1623,20 +1657,21 @@ fun HomeScreen(
     if (showDraftBackWarning != null) {
         AlertDialog(
             onDismissRequest = { showDraftBackWarning = null },
-            title = { Text("Save changes before leaving?", fontWeight = FontWeight.Bold) },
-            text = { Text("Unsaved changes were detected. Discarding will rollback edits made in the session.") },
+            title = { Text("Discard unsaved details?", fontWeight = FontWeight.Bold) },
+            text = { Text("You have typed patient details that are not saved yet. Discard them?") },
             confirmButton = {
                 Button(onClick = {
+                    // Keep editing: close only this warning.
                     showDraftBackWarning = null
-                    // Execute standard action
                 }) {
-                    Text("Save Draft", fontWeight = FontWeight.Bold)
+                    Text("Keep Editing", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = {
+                    val discard = showDraftBackWarning
                     showDraftBackWarning = null
-                    // Discard action
+                    discard?.invoke()
                 }) {
                     Text("Discard", color = MaterialTheme.colorScheme.error)
                 }
@@ -1738,11 +1773,42 @@ fun HomeScreen(
                         Text("Rename Blueprint Template")
                     }
 
+                    // Pin to the top of "New Entry"
+                    val isPinned = selTemp.uid in pinnedTemplates
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.togglePinnedTemplate(selTemp.uid)
+                            selectedTemplateForOptions = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(if (isPinned) Icons.Default.StarBorder else Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (isPinned) "Unpin from New Entry" else "Pin to top of New Entry")
+                    }
+
+                    // Archive keeps the template and its log entries but hides it from "New Entry"
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.setTemplateArchived(selTemp, archived = selTemp.isActive)
+                            selectedTemplateForOptions = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(if (selTemp.isActive) Icons.Default.Archive else Icons.Default.Unarchive, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (selTemp.isActive) "Archive (keep entries, hide from New Entry)" else "Unarchive")
+                    }
+
                     // Option 5: Delete Blueprint
                     Button(
                         onClick = {
                             selectedTemplateForOptions = null
-                            viewModel.deleteTemplate(selTemp)
+                            viewModel.countEntriesForTemplate(selTemp.uid) { count ->
+                                templateToDelete = selTemp to count
+                            }
                         },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
@@ -1813,15 +1879,37 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("This is a structural layout blueprint display:", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
-                    
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("A. Demographic Block Information", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                            Text("Question Checklist fields render instantly when logs are solving.", fontSize = 11.sp)
+
+                    var preview by remember(temp.uid) { mutableStateOf<List<Pair<String, List<Pair<FormField, List<com.example.data.model.FormFieldOption>>>>>?>(null) }
+                    LaunchedEffect(temp.uid) { viewModel.loadTemplatePreview(temp.uid) { preview = it } }
+
+                    when {
+                        preview == null -> CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        preview!!.isEmpty() -> Text("This template has no questions yet.", fontSize = 11.sp)
+                        else -> preview!!.forEach { (sectionTitle, sectionFields) ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(sectionTitle, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                    if (sectionFields.isEmpty()) {
+                                        Text("No questions in this group.", fontSize = 11.sp)
+                                    }
+                                    sectionFields.forEach { (field, opts) ->
+                                        Text("• ${field.label}${if (field.isRequired) " *" else ""}", fontSize = 11.sp)
+                                        if (opts.isNotEmpty()) {
+                                            Text(
+                                                opts.joinToString(" / ") { it.label },
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.secondary,
+                                                modifier = Modifier.padding(start = 10.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1866,6 +1954,16 @@ fun HomeScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(8.dp)
                             )
+
+                            // Quick-add a patient without leaving New Entry
+                            TextButton(
+                                onClick = { showCreatePatientDialog = true },
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) {
+                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("New patient", fontSize = 12.sp)
+                            }
 
                             // Quick Theatre selection
                             Surface(
@@ -1926,7 +2024,9 @@ fun HomeScreen(
                         2 -> { // Step 2: Select active checklist blueprint
                             Text("Select a template:", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
                             
-                            if (templates.isEmpty()) {
+                            val wizardTemplates = templates.filter { it.isActive }
+                                .sortedByDescending { it.uid in pinnedTemplates }
+                            if (wizardTemplates.isEmpty()) {
                                 Text("No templates are drafted yet. Add templates first!")
                             } else {
                                 Column(
@@ -1936,7 +2036,7 @@ fun HomeScreen(
                                         .verticalScroll(rememberScrollState()),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    templates.forEach { temp ->
+                                    wizardTemplates.forEach { temp ->
                                         Surface(
                                             onClick = {
                                                 viewModel.clearSolveAnswers()
@@ -1951,7 +2051,11 @@ fun HomeScreen(
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
                                             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.List, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                Icon(
+                                                    if (temp.uid in pinnedTemplates) Icons.Default.Star else Icons.Default.List,
+                                                    contentDescription = if (temp.uid in pinnedTemplates) "Pinned" else null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
                                                 Spacer(modifier = Modifier.width(10.dp))
                                                 Text(temp.name, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                             }
@@ -2031,7 +2135,7 @@ fun HomeScreen(
                     when (syncHubTab) {
                         0 -> { // Cloud Sync Tab (Existing functionality)
                             Text(
-                                text = "Real-time synchronization over Cloud SQL and secure Firebase Storage sandbox.",
+                                text = "Cloud sync is not available yet. Your data stays on this phone — use Backup & Restore to keep a copy.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.secondary
                             )
@@ -2045,9 +2149,9 @@ fun HomeScreen(
                                     Text("Offline Sync Status:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
                                     Text(
                                         text = when (syncState) {
-                                            is SyncState.Idle -> "Connected - Sandbox cached local"
-                                            is SyncState.Syncing -> "Uploading local data..."
-                                            is SyncState.Success -> "Fully Merged with Clinical Cloud Server"
+                                            is SyncState.Idle -> "Not connected (coming soon)"
+                                            is SyncState.Syncing -> "Checking..."
+                                            is SyncState.Success -> "Nothing was uploaded: cloud sync is not available yet"
                                             is SyncState.Error -> "Sync error: ${(syncState as SyncState.Error).errorMsg}"
                                         },
                                         fontSize = 11.sp,
@@ -2130,8 +2234,12 @@ fun HomeScreen(
                                     // PDF button
                                     Button(
                                         onClick = {
-                                            val file = com.example.data.service.ExportService.generatePdf(context, exportList, fieldLabelMap)
-                                            com.example.data.service.ExportService.shareFile(context, file, "application/pdf")
+                                            scope.launch {
+                                                val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                    com.example.data.service.ExportService.generatePdf(context, exportList, fieldLabelMap, fieldOrder)
+                                                }
+                                                com.example.data.service.ExportService.shareFile(context, file, "application/pdf")
+                                            }
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(10.dp)
@@ -2144,8 +2252,12 @@ fun HomeScreen(
                                     // CSV button
                                     Button(
                                         onClick = {
-                                            val file = com.example.data.service.ExportService.generateCsv(context, exportList)
-                                            com.example.data.service.ExportService.shareFile(context, file, "text/csv")
+                                            scope.launch {
+                                                val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                    com.example.data.service.ExportService.generateCsv(context, exportList, fieldLabelMap, fieldOrder)
+                                                }
+                                                com.example.data.service.ExportService.shareFile(context, file, "text/csv")
+                                            }
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
@@ -2159,8 +2271,12 @@ fun HomeScreen(
                                     // ZIP package button
                                     Button(
                                         onClick = {
-                                            val file = com.example.data.service.ExportService.generateZipArchive(context, templates, patients, exportList)
-                                            com.example.data.service.ExportService.shareFile(context, file, "application/zip")
+                                            viewModel.exportZipBundle(
+                                                selectedEntries = exportList,
+                                                fieldLabelMap = fieldLabelMap,
+                                                onReady = { file -> com.example.data.service.ExportService.shareFile(context, file, "application/zip") },
+                                                onError = { restoreMessage = it }
+                                            )
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
@@ -2183,8 +2299,10 @@ fun HomeScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                 Button(
                                     onClick = {
-                                        val file = com.example.data.service.ExportService.generateJsonBackup(context, templates, patients, entries)
-                                        com.example.data.service.ExportService.shareFile(context, file, "application/json")
+                                        viewModel.exportFullBackup(
+                                            onReady = { file -> com.example.data.service.ExportService.shareFile(context, file, "application/json") },
+                                            onError = { restoreMessage = it }
+                                        )
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(10.dp)
@@ -2255,8 +2373,8 @@ fun HomeScreen(
                         if (pastedJsonText.isNotBlank()) {
                             viewModel.restoreBackup(
                                 jsonString = pastedJsonText,
-                                onSuccess = {
-                                    restoreMessage = "EMR Database elements successfully restored!"
+                                onSuccess = { report ->
+                                    restoreMessage = "Backup restored. Nothing already on this phone was deleted.\n\n$report"
                                     showTextRestoreDialog = false
                                     showSyncHubDialog = false // Dismiss both to refresh
                                 },
@@ -2284,7 +2402,7 @@ fun HomeScreen(
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Text("Backup System Alert")
+                    Text("Backup & Export")
                 }
             },
             text = { Text(restoreMessage!!) },
@@ -2308,8 +2426,8 @@ fun HomeScreen(
             onDismissRequest = { showGeminiApiSettingsDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Text("Gemini API Key Setup")
+                    Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Text("Settings")
                 }
             },
             text = {
@@ -2319,6 +2437,48 @@ fun HomeScreen(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    // Appearance: System follows the phone's dark mode.
+                    val themeMode by viewModel.themeMode.collectAsState()
+                    Text("Appearance", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        val modes = listOf(ThemeMode.SYSTEM to "System", ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark")
+                        modes.forEachIndexed { index, (mode, label) ->
+                            SegmentedButton(
+                                selected = themeMode == mode,
+                                onClick = { viewModel.setThemeMode(mode) },
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
+                                label = { Text(label, fontSize = 12.sp) }
+                            )
+                        }
+                    }
+
+                    HorizontalDivider()
+
+                    // App lock uses the phone's own screen lock (PIN, pattern, fingerprint or face).
+                    val appLockEnabled by viewModel.appLockEnabled.collectAsState()
+                    val deviceSecure = remember {
+                        (context.getSystemService(android.content.Context.KEYGUARD_SERVICE) as android.app.KeyguardManager).isDeviceSecure
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("App lock", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(
+                                if (deviceSecure) "Ask for the phone's PIN or fingerprint when opening LogiMind."
+                                else "Set a screen lock (PIN, pattern or fingerprint) on this phone to use this.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        Switch(
+                            checked = appLockEnabled && deviceSecure,
+                            onCheckedChange = { viewModel.setAppLockEnabled(it) },
+                            enabled = deviceSecure
+                        )
+                    }
+
+                    HorizontalDivider()
+
+                    Text("Gemini API Key", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     Text(
                         text = "To run real-time clinical summarizations secure and free, paste your personal Google Gemini API key.",
                         fontSize = 13.sp,
@@ -2433,7 +2593,7 @@ fun HomeScreen(
                                 Text("Security Info:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             }
                             Text(
-                                text = "Your key remains strictly private. It is written encrypt-ready directly inside Android local storage. This application functions as a static logbook and never relays keys to any third-party databases.",
+                                text = "Your key is stored encrypted on this phone only and is sent only to Google's Gemini API when you run a Gemini summary. Selected log contents (including patient names) are sent to Google for that summary.",
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -2608,7 +2768,7 @@ fun HomeScreen(
                 Button(
                     onClick = {
                         logToDelete?.let { entry ->
-                            viewModel.deleteFormEntry(entry.uid)
+                            viewModel.deleteFormEntry(entry.uid) { undo -> showUndo("Log entry deleted", undo) }
                             if (selectedEntryForView?.uid == entry.uid) {
                                 selectedEntryForView = null
                             }
@@ -2631,6 +2791,105 @@ fun HomeScreen(
         )
     }
 
+    if (showCloudAiConsentFor != null) {
+        AlertDialog(
+            onDismissRequest = { showCloudAiConsentFor = null },
+            title = { Text("Send logs to Google Gemini?") },
+            text = {
+                Text("The selected log contents, including patient names and answers, will be sent to Google's Gemini API to write the summary. Only continue if your data policy allows this.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    context.getSharedPreferences("logimind_prefs", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("ai_consent_v1", true).apply()
+                    selectedAiProvider = showCloudAiConsentFor!!
+                    showCloudAiConsentFor = null
+                }) {
+                    Text("Allow")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloudAiConsentFor = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (templateToDelete != null) {
+        val (temp, entryCount) = templateToDelete!!
+        AlertDialog(
+            onDismissRequest = { templateToDelete = null },
+            title = { Text("Delete Blueprint?") },
+            text = {
+                Text(
+                    if (entryCount > 0) {
+                        "Deleting '${temp.name}' also permanently deletes the $entryCount log entr${if (entryCount == 1) "y" else "ies"} filled with it. This cannot be undone. Export a backup first if you may need them."
+                    } else {
+                        "Delete '${temp.name}' and all its questions? This cannot be undone."
+                    }
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteTemplate(temp)
+                        templateToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(if (entryCount > 0) "Delete all" else "Delete")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { templateToDelete = null }) {
+                        Text("Cancel")
+                    }
+                    if (entryCount > 0 && temp.isActive) {
+                        TextButton(onClick = {
+                            viewModel.setTemplateArchived(temp, archived = true)
+                            templateToDelete = null
+                        }) {
+                            Text("Archive instead")
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    if (patientToDelete != null) {
+        val pat = patientToDelete!!
+        val linkedLogs = entries.count { it.patientId == pat.uid }
+        AlertDialog(
+            onDismissRequest = { patientToDelete = null },
+            title = { Text("Delete Patient Profile?") },
+            text = {
+                Text(
+                    "Delete '${pat.name}' (${pat.medicalId})? " +
+                        if (linkedLogs > 0) "Their $linkedLogs log entr${if (linkedLogs == 1) "y is" else "ies are"} kept and still show the patient's name." else "This cannot be undone."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deletePatient(pat) { undo -> showUndo("Patient profile deleted", undo) }
+                        patientToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { patientToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     if (showSelectLogsForAiDialog) {
         var localSelection by remember(selectedEntriesForAiSummary) {
             mutableStateOf(selectedEntriesForAiSummary.map { it.uid }.toSet())
@@ -2640,56 +2899,7 @@ fun HomeScreen(
 
         val filteredAiEntries = remember(entries, aiSortStartDate, aiSortEndDate) {
             entries.filter { entry ->
-                val entryDateMs = entry.createdAt
-                val startOk = if (aiSortStartDate != null) {
-                    val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                        timeInMillis = aiSortStartDate!!
-                        set(java.util.Calendar.HOUR_OF_DAY, 0)
-                        set(java.util.Calendar.MINUTE, 0)
-                        set(java.util.Calendar.SECOND, 0)
-                        set(java.util.Calendar.MILLISECOND, 0)
-                    }
-                    val entryCal = java.util.Calendar.getInstance().apply {
-                        timeInMillis = entryDateMs
-                    }
-                    entryCal.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                    val entryCompCal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                        set(java.util.Calendar.YEAR, entryCal.get(java.util.Calendar.YEAR))
-                        set(java.util.Calendar.MONTH, entryCal.get(java.util.Calendar.MONTH))
-                        set(java.util.Calendar.DAY_OF_MONTH, entryCal.get(java.util.Calendar.DAY_OF_MONTH))
-                        set(java.util.Calendar.HOUR_OF_DAY, 0)
-                        set(java.util.Calendar.MINUTE, 0)
-                        set(java.util.Calendar.SECOND, 0)
-                        set(java.util.Calendar.MILLISECOND, 0)
-                    }
-                    entryCompCal.timeInMillis >= calendar.timeInMillis
-                } else true
-
-                val endOk = if (aiSortEndDate != null) {
-                    val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                        timeInMillis = aiSortEndDate!!
-                        set(java.util.Calendar.HOUR_OF_DAY, 23)
-                        set(java.util.Calendar.MINUTE, 59)
-                        set(java.util.Calendar.SECOND, 59)
-                        set(java.util.Calendar.MILLISECOND, 999)
-                    }
-                    val entryCal = java.util.Calendar.getInstance().apply {
-                        timeInMillis = entryDateMs
-                    }
-                    entryCal.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                    val entryCompCal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                        set(java.util.Calendar.YEAR, entryCal.get(java.util.Calendar.YEAR))
-                        set(java.util.Calendar.MONTH, entryCal.get(java.util.Calendar.MONTH))
-                        set(java.util.Calendar.DAY_OF_MONTH, entryCal.get(java.util.Calendar.DAY_OF_MONTH))
-                        set(java.util.Calendar.HOUR_OF_DAY, 0)
-                        set(java.util.Calendar.MINUTE, 0)
-                        set(java.util.Calendar.SECOND, 0)
-                        set(java.util.Calendar.MILLISECOND, 0)
-                    }
-                    entryCompCal.timeInMillis <= calendar.timeInMillis
-                } else true
-
-                startOk && endOk
+                isWithinDayRange(entry.createdAt, aiSortStartDate, aiSortEndDate)
             }
         }
 
@@ -2808,6 +3018,7 @@ fun HomeScreen(
                     onClick = {
                         val selectedList = entries.filter { localSelection.contains(it.uid) }
                         selectedEntriesForAiSummary = selectedList
+                        if (selectedList.isNotEmpty()) aiRunRequest++
                         showSelectLogsForAiDialog = false
                     }
                 ) {
@@ -2825,14 +3036,33 @@ fun HomeScreen(
     }
 
     // --- ENROLL PATIENT DIALOG INCORPORATING CUSTOM QUESTIONS ---
-    if (showCreatePatientDialog) {
-        var pName by remember { mutableStateOf("") }
-        var pMrn by remember { mutableStateOf("") }
-        var pPhone by remember { mutableStateOf("") }
-        var pAge by remember { mutableStateOf("") }
-        var pInsurance by remember { mutableStateOf("") }
-        var pNotes by remember { mutableStateOf("") }
-        var customAnswersMap by remember { mutableStateOf(mapOf<String, String>()) }
+    if (showCreatePatientDialog || patientToEdit != null) {
+        val editing = patientToEdit
+        val closePatientDialog = {
+            showCreatePatientDialog = false
+            patientToEdit = null
+        }
+        var pName by remember(editing) { mutableStateOf(editing?.name ?: "") }
+        var pMrn by remember(editing) { mutableStateOf(editing?.medicalId ?: "") }
+        var pPhone by remember(editing) { mutableStateOf(editing?.phone ?: "") }
+        var pAge by remember(editing) { mutableStateOf(editing?.age ?: "") }
+        var pInsurance by remember(editing) { mutableStateOf(editing?.insurance ?: "") }
+        var pNotes by remember(editing) { mutableStateOf(editing?.notes ?: "") }
+        var customAnswersMap by remember(editing) {
+            mutableStateOf<Map<String, String>>(
+                editing?.customAnswersJson?.let { raw ->
+                    try {
+                        val o = JSONObject(raw)
+                        o.keys().asSequence().associateWith { o.optString(it) }
+                    } catch (e: Exception) {
+                        emptyMap<String, String>()
+                    }
+                } ?: emptyMap()
+            )
+        }
+        val duplicateMrn = pMrn.isNotBlank() && patients.any {
+            it.uid != editing?.uid && it.medicalId.trim().equals(pMrn.trim(), ignoreCase = true)
+        }
 
         // Dynamic checks for required fields
         var validationErrorText by remember { mutableStateOf<String?>(null) }
@@ -2840,13 +3070,13 @@ fun HomeScreen(
         AlertDialog(
             onDismissRequest = {
                 // Check if changes are unsaved, then throw alert warnings
-                if (pName.isNotBlank() || pMrn.isNotBlank()) {
-                    showDraftBackWarning = { showCreatePatientDialog = false }
+                if (editing == null && (pName.isNotBlank() || pMrn.isNotBlank())) {
+                    showDraftBackWarning = { closePatientDialog() }
                 } else {
-                    showCreatePatientDialog = false
+                    closePatientDialog()
                 }
             },
-            title = { Text("Enroll New EMR Profile") },
+            title = { Text(if (editing != null) "Edit Patient Profile" else "Enroll New EMR Profile") },
             text = {
                 Column(
                     modifier = Modifier
@@ -2871,7 +3101,11 @@ fun HomeScreen(
                         label = { Text("Medical ID (MRN) *") },
                         placeholder = { Text("e.g. MRN-A3092") },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        isError = duplicateMrn,
+                        supportingText = if (duplicateMrn) {
+                            { Text("Another patient already has this MRN.") }
+                        } else null
                     )
 
                     // Dynamically active customizable fields
@@ -2979,29 +3213,43 @@ fun HomeScreen(
                                 }.toString()
                             }
 
-                            viewModel.addPatientDetailed(
-                                name = pName,
-                                medicalId = pMrn,
-                                phone = pPhone.ifBlank { null },
-                                age = pAge.ifBlank { null },
-                                insurance = pInsurance.ifBlank { null },
-                                notes = pNotes.ifBlank { null },
-                                customAnswers = answersJsonStr
-                            )
-                            showCreatePatientDialog = false
+                            if (editing != null) {
+                                viewModel.updatePatient(
+                                    editing.copy(
+                                        name = pName.trim(),
+                                        medicalId = pMrn.trim(),
+                                        phone = pPhone.ifBlank { null },
+                                        age = pAge.ifBlank { null },
+                                        insurance = pInsurance.ifBlank { null },
+                                        notes = pNotes.ifBlank { null },
+                                        customAnswersJson = answersJsonStr
+                                    )
+                                )
+                            } else {
+                                viewModel.addPatientDetailed(
+                                    name = pName,
+                                    medicalId = pMrn,
+                                    phone = pPhone.ifBlank { null },
+                                    age = pAge.ifBlank { null },
+                                    insurance = pInsurance.ifBlank { null },
+                                    notes = pNotes.ifBlank { null },
+                                    customAnswers = answersJsonStr
+                                )
+                            }
+                            closePatientDialog()
                         }
                     }
                 ) {
-                    Text("Enroll Patient")
+                    Text(if (editing != null) "Save Changes" else "Enroll Patient")
                 }
             },
             dismissButton = {
                 TextButton(
                     onClick = {
-                        if (pName.isNotBlank() || pMrn.isNotBlank()) {
-                            showDraftBackWarning = { showCreatePatientDialog = false }
+                        if (editing == null && (pName.isNotBlank() || pMrn.isNotBlank())) {
+                            showDraftBackWarning = { closePatientDialog() }
                         } else {
-                            showCreatePatientDialog = false
+                            closePatientDialog()
                         }
                     }
                 ) {
@@ -3122,71 +3370,16 @@ fun HomeScreen(
             map
         }
 
-        val proceduresIPerformed = remember(entry, answersMap) {
-            val list = mutableListOf<String>()
-            for ((_, answer) in answersMap) {
-                if (answer.startsWith("{") && answer.contains("procedure")) {
-                    try {
-                        val obj = JSONObject(answer)
-                        val choicesPerf = obj.optJSONObject("choices_perf")
-                        if (choicesPerf != null) {
-                            val keys = choicesPerf.keys()
-                            while (keys.hasNext()) {
-                                val choice = keys.next()
-                                if (choicesPerf.optBoolean(choice, false)) {
-                                    list.add("${obj.optString("procedure")}: $choice")
-                                }
-                            }
-                        } else {
-                            if (obj.optBoolean("completed", false) && obj.optBoolean("performedByMe", false)) {
-                                val procName = if (obj.has("choices") && !obj.optString("choices").isNullOrBlank()) {
-                                    "${obj.optString("procedure")}: ${obj.optString("choices")}"
-                                } else {
-                                    obj.optString("procedure")
-                                }
-                                list.add(procName)
-                            }
-                        }
-                    } catch (e: Exception) {}
-                }
-            }
-            list
+        val procedureItems = remember(entry, answersMap) {
+            answersMap.values.flatMap { com.example.data.model.ProcedureAnswer.completedItems(it) }
         }
-
-        val otherProcedures = remember(entry, answersMap) {
-            val list = mutableListOf<String>()
-            for ((_, answer) in answersMap) {
-                if (answer.startsWith("{") && answer.contains("procedure")) {
-                    try {
-                        val obj = JSONObject(answer)
-                        val choicesPerf = obj.optJSONObject("choices_perf")
-                        if (choicesPerf != null) {
-                            val allChoices = obj.optString("choices", "").split(",").filter { it.isNotBlank() }
-                            for (choice in allChoices) {
-                                if (!choicesPerf.optBoolean(choice, false)) {
-                                    list.add("${obj.optString("procedure")}: $choice")
-                                }
-                            }
-                        } else {
-                            if (obj.optBoolean("completed", false) && !obj.optBoolean("performedByMe", false)) {
-                                val procName = if (obj.has("choices") && !obj.optString("choices").isNullOrBlank()) {
-                                    "${obj.optString("procedure")}: ${obj.optString("choices")}"
-                                } else {
-                                    obj.optString("procedure")
-                                }
-                                list.add(procName)
-                            }
-                        }
-                    } catch (e: Exception) {}
-                }
-            }
-            list
-        }
+        val proceduresIPerformed = procedureItems.filter { it.performedByMe }.map { it.name }
+        val otherProcedures = procedureItems.filter { !it.performedByMe }.map { it.name }
 
         val normalAnswers = remember(entry, answersMap) {
-            val list = mutableListOf<Pair<String, String>>()
+            val list = mutableListOf<Triple<String, String, String>>() // fieldId, label, display value
             for ((fieldId, answer) in answersMap) {
-                if (answer.startsWith("{") && answer.contains("procedure")) {
+                if (com.example.data.model.ProcedureAnswer.isProcedure(answer) || answer.isBlank()) {
                     continue
                 }
                 val label = fieldLabelMap[fieldId] ?: fieldId.split("_").joinToString(" ") { fieldPart ->
@@ -3194,9 +3387,14 @@ fun HomeScreen(
                         if (charPart.isLowerCase()) charPart.titlecase(java.util.Locale.getDefault()) else charPart.toString()
                     }
                 }
-                list.add(label to answer)
+                val display = when (answer) {
+                    "true" -> "Yes"
+                    "false" -> "No"
+                    else -> answer
+                }
+                list.add(Triple(fieldId, label, display))
             }
-            list
+            list.sortedBy { fieldOrder[it.first] ?: Int.MAX_VALUE }
         }
 
         ModalBottomSheet(
@@ -3223,7 +3421,7 @@ fun HomeScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Filing Date: Blueprint ${entry.templateName}",
+                            text = "Filed: ${java.text.SimpleDateFormat("MMM d, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(entry.createdAt))} • Blueprint: ${entry.templateName}",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.secondary
                         )
@@ -3245,7 +3443,12 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(text = entry.patientName ?: "General Theatre", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text(text = "Patient MRN Profile linked", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                            val linkedPatient = patients.find { it.uid == entry.patientId }
+                            Text(
+                                text = if (linkedPatient != null) "MRN: ${linkedPatient.medicalId}" else "No patient profile linked",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
                         }
                     }
                 }
@@ -3276,8 +3479,7 @@ fun HomeScreen(
                                 color = MaterialTheme.colorScheme.outline,
                                 modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                             )
-                            for ((formattedLabel, answer) in normalAnswers) {
-                                val fieldId = answersMap.filterValues { it == answer }.keys.firstOrNull() ?: ""
+                            for ((fieldId, formattedLabel, answer) in normalAnswers) {
                                 val attrItem = attributionsMap[fieldId]
 
                                 Surface(
@@ -3323,7 +3525,10 @@ fun HomeScreen(
                                                     )
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text(
-                                                        text = "By: ${attrItem.providerName} (${attrItem.providerType}) | Witness: ${attrItem.supervisorWitness.ifBlank { "None" }} ${if (attrItem.isWitnessVerified) "✓" else ""}",
+                                                        text = listOfNotNull(
+                                                            attrItem.providerName.takeIf { it.isNotBlank() }?.let { "By: $it${if (attrItem.providerType.isNotBlank()) " (${attrItem.providerType})" else ""}" },
+                                                            attrItem.supervisorWitness.takeIf { it.isNotBlank() }?.let { "Witness: $it${if (attrItem.isWitnessVerified) " ✓" else ""}" }
+                                                        ).joinToString(" | ").ifBlank { "No attribution" },
                                                         fontSize = 9.sp,
                                                         color = MaterialTheme.colorScheme.primary,
                                                         fontWeight = FontWeight.Bold
@@ -3365,6 +3570,25 @@ fun HomeScreen(
                                         Text(text = "• $proc", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
+                            }
+                        }
+
+                        // Supervision recorded on procedure questions
+                        val supervisionLines = attributionsMap.filter { (key, a) ->
+                            a.supervisorWitness.isNotBlank() && com.example.data.model.ProcedureAnswer.isProcedure(answersMap[key] ?: "")
+                        }.map { (key, a) ->
+                            "${fieldLabelMap[key] ?: "Procedure"}: ${a.supervisorWitness}${if (a.isWitnessVerified) " ✓ verified" else " (not verified)"}"
+                        }
+                        if (supervisionLines.isNotEmpty()) {
+                            Text(
+                                text = "Supervisor / Witness",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
+                            )
+                            supervisionLines.forEach { line ->
+                                Text(text = "• $line", fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp))
                             }
                         }
 
@@ -3423,6 +3647,22 @@ fun HomeScreen(
                         }
                     }
 
+                    if (matchedTemplate != null) {
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.startNewEntryFrom(entry)
+                                selectedEntryForView = null
+                                onNavigateToSolve(matchedTemplate)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Repeat as New Entry", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
                     Button(
                         onClick = {
                             selectedEntryForAiSummary = entry
@@ -3443,8 +3683,12 @@ fun HomeScreen(
                     ) {
                         Button(
                             onClick = {
-                                val file = com.example.data.service.ExportService.generatePdf(context, listOf(entry), fieldLabelMap)
-                                com.example.data.service.ExportService.shareFile(context, file, "application/pdf")
+                                scope.launch {
+                                    val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        com.example.data.service.ExportService.generatePdf(context, listOf(entry), fieldLabelMap, fieldOrder)
+                                    }
+                                    com.example.data.service.ExportService.shareFile(context, file, "application/pdf")
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
                             modifier = Modifier.weight(1f),
@@ -3457,8 +3701,12 @@ fun HomeScreen(
 
                         Button(
                             onClick = {
-                                val file = com.example.data.service.ExportService.generateCsv(context, listOf(entry))
-                                com.example.data.service.ExportService.shareFile(context, file, "text/csv")
+                                scope.launch {
+                                    val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        com.example.data.service.ExportService.generateCsv(context, listOf(entry), fieldLabelMap, fieldOrder)
+                                    }
+                                    com.example.data.service.ExportService.shareFile(context, file, "text/csv")
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
                             modifier = Modifier.weight(1f),
@@ -3491,9 +3739,15 @@ fun HomeScreen(
     if (showPremiumUpsellDialog) {
         AlertDialog(
             onDismissRequest = { showPremiumUpsellDialog = false },
-            title = { Text("⚡ Premium EMR Reports Export") },
+            title = { Text("⚡ LogiMind Plan") },
             text = {
-                Text("Ready-to-print PDF")
+                Text(
+                    if (subscriptionTier == SubscriptionTier.PREMIUM) {
+                        "All features are unlocked on this device."
+                    } else {
+                        "Premium features are not available in this version."
+                    }
+                )
             },
             confirmButton = {
                 Button(onClick = { showPremiumUpsellDialog = false }) {
@@ -3504,60 +3758,63 @@ fun HomeScreen(
     }
 
     if (showProceduresDashboard) {
-        val myProceduresStatistics = remember(entries) {
+        val myProceduresStatistics = remember(entries, fieldLabelMap) {
             val list = mutableListOf<MyProcedureCase>()
             for (entry in entries) {
-                if (!entry.answersJson.isBlank()) {
-                    try {
-                        val obj = JSONObject(entry.answersJson)
-                        val keys = obj.keys()
-                        while (keys.hasNext()) {
-                            val key = keys.next()
-                            val valStr = obj.optString(key)
-                            if (valStr.startsWith("{") && valStr.contains("procedure")) {
-                                val pObj = JSONObject(valStr)
-                                val choicesPerf = pObj.optJSONObject("choices_perf")
-                                if (choicesPerf != null) {
-                                    val keys = choicesPerf.keys()
-                                    while (keys.hasNext()) {
-                                        val choice = keys.next()
-                                        if (choicesPerf.optBoolean(choice, false)) {
-                                            val name = "${pObj.optString("procedure")}: $choice"
-                                            list.add(
-                                                MyProcedureCase(
-                                                    procedureName = name,
-                                                    entry = entry,
-                                                    date = entry.createdAt,
-                                                    patientName = entry.patientName ?: "Theatre",
-                                                    templateName = entry.templateName ?: "Log Checklist"
-                                                )
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    if (pObj.optBoolean("completed", false) && pObj.optBoolean("performedByMe", false)) {
-                                        val name = if (pObj.has("choices") && !pObj.optString("choices").isNullOrBlank()) {
-                                            "${pObj.optString("procedure")}: ${pObj.optString("choices")}"
-                                        } else {
-                                            pObj.optString("procedure")
-                                        }
-                                        list.add(
-                                            MyProcedureCase(
-                                                procedureName = name,
-                                                entry = entry,
-                                                date = entry.createdAt,
-                                                patientName = entry.patientName ?: "Theatre",
-                                                templateName = entry.templateName ?: "Log Checklist"
-                                            )
-                                        )
-                                    }
-                                }
-                            }
+                if (entry.answersJson.isBlank()) continue
+                try {
+                    val obj = JSONObject(entry.answersJson)
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val valStr = obj.optString(key)
+                        if (!com.example.data.model.ProcedureAnswer.isProcedure(valStr)) continue
+                        // Group by the question's current label so renaming it does not split counts.
+                        val storedLabel = JSONObject(valStr).optString("procedure")
+                        val currentLabel = fieldLabelMap[key] ?: storedLabel
+                        for (item in com.example.data.model.ProcedureAnswer.completedItems(valStr)) {
+                            if (!item.performedByMe) continue
+                            list.add(
+                                MyProcedureCase(
+                                    procedureName = currentLabel + item.name.removePrefix(storedLabel),
+                                    entry = entry,
+                                    date = entry.createdAt,
+                                    patientName = entry.patientName ?: "Theatre",
+                                    templateName = entry.templateName ?: "Log Checklist"
+                                )
+                            )
                         }
-                    } catch (e: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             }
             list
+        }
+
+        val reportRows = remember(entries, fieldLabelMap) {
+            entries.flatMap { entry ->
+                try {
+                    val obj = JSONObject(entry.answersJson)
+                    obj.keys().asSequence().flatMap { key ->
+                        val valStr = obj.optString(key)
+                        if (!com.example.data.model.ProcedureAnswer.isProcedure(valStr)) return@flatMap emptySequence()
+                        val storedLabel = JSONObject(valStr).optString("procedure")
+                        val currentLabel = fieldLabelMap[key] ?: storedLabel
+                        com.example.data.model.ProcedureAnswer.completedItems(valStr).asSequence().map { item ->
+                            com.example.data.service.ExportService.ProcedureCaseRow(
+                                procedure = currentLabel + item.name.removePrefix(storedLabel),
+                                date = entry.createdAt,
+                                patientName = entry.patientName ?: "Theatre",
+                                templateName = entry.templateName ?: "Log Checklist",
+                                performedByMe = item.performedByMe
+                            )
+                        }
+                    }.toList()
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            }
         }
 
         var searchProcedureQuery by remember { mutableStateOf("") }
@@ -3726,6 +3983,26 @@ fun HomeScreen(
                             }
 
                             Spacer(modifier = Modifier.height(14.dp))
+
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            com.example.data.service.ExportService.generateProcedureReport(context, reportRows, "LogiMind Procedure Logbook")
+                                        }
+                                        com.example.data.service.ExportService.shareFile(context, file, "application/pdf")
+                                    }
+                                },
+                                enabled = reportRows.isNotEmpty(),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Export Procedure Report (PDF)", fontSize = 12.sp)
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
 
                             Text(
                                 text = "Aggregated Case Counts (${filteredAggregated.size} unique procedures)",
@@ -3946,6 +4223,24 @@ fun DemographicRow(label: String, value: String) {
         Text(text = label, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
         Text(text = value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
     }
+}
+
+// Picker dates are UTC midnight of the chosen day; entries are compared by their local calendar day.
+fun isWithinDayRange(createdAt: Long, startPickerMs: Long?, endPickerMs: Long?): Boolean {
+    fun dayKey(cal: java.util.Calendar) =
+        cal.get(java.util.Calendar.YEAR) * 10000 + (cal.get(java.util.Calendar.MONTH) + 1) * 100 + cal.get(java.util.Calendar.DAY_OF_MONTH)
+    fun pickerDay(ms: Long) = dayKey(java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply { timeInMillis = ms })
+    val entryDay = dayKey(java.util.Calendar.getInstance().apply { timeInMillis = createdAt })
+    if (startPickerMs != null && entryDay < pickerDay(startPickerMs)) return false
+    if (endPickerMs != null && entryDay > pickerDay(endPickerMs)) return false
+    return true
+}
+
+// Label for a saved intake answer whose question config is gone (configs were not saved before v1.1).
+fun intakeKeyFallbackLabel(key: String): String = when (key) {
+    "allergies" -> "Drug Allergy Detail History"
+    "bloodGroup" -> "Patient ABO Blood Type"
+    else -> if (key.startsWith("custom_intake_")) "Custom Question" else key
 }
 
 // Helpers for modifier scale

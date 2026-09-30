@@ -1,10 +1,17 @@
 package com.example.data.repository
 
+import androidx.room.withTransaction
+import com.example.data.local.AppDatabase
 import com.example.data.local.MedicalFormDao
 import com.example.data.model.*
 import kotlinx.coroutines.flow.Flow
 
-class FormRepository(private val dao: MedicalFormDao) {
+class FormRepository(private val database: AppDatabase) {
+
+    private val dao: MedicalFormDao = database.medicalFormDao()
+
+    // Runs multi-step writes atomically so a crash mid-save never leaves partial data.
+    suspend fun <R> inTransaction(block: suspend () -> R): R = database.withTransaction { block() }
 
     // --- Templates ---
     val allTemplates: Flow<List<FormTemplate>> = dao.getAllFormTemplatesFlow()
@@ -71,6 +78,21 @@ class FormRepository(private val dao: MedicalFormDao) {
     suspend fun insertEntry(entry: FormEntry) = dao.insertFormEntry(entry)
 
     suspend fun deleteEntry(uid: String) = dao.deleteFormEntryByUid(uid)
+
+    val allSections: Flow<List<FormSection>> = dao.getAllSectionsFlow()
+
+    suspend fun updatePatientNameInEntries(patientId: String, name: String) = dao.updatePatientNameInEntries(patientId, name)
+
+    // --- Full backup reads ---
+    suspend fun getAllSections(): List<FormSection> = dao.getAllSections()
+
+    suspend fun getAllFields(): List<FormField> = dao.getAllFields()
+
+    suspend fun getAllOptions(): List<FormFieldOption> = dao.getAllOptions()
+
+    suspend fun getAllAnswers(): List<EntryAnswer> = dao.getAllAnswers()
+
+    suspend fun countEntriesForTemplate(templateId: String): Int = dao.countEntriesForTemplate(templateId)
 
     // --- Answers ---
     fun getAnswersForEntry(entryId: String): Flow<List<EntryAnswer>> = dao.getAnswersForEntryFlow(entryId)

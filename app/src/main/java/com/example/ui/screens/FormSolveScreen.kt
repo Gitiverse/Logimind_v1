@@ -55,6 +55,10 @@ fun FormSolveScreen(
     var selectedPatient by remember(wizardPatient) { mutableStateOf(wizardPatient) }
     var entryTitle by remember(editingEntryTitle) { mutableStateOf(editingEntryTitle) }
     var showSuccessToast by remember { mutableStateOf(false) }
+    var savedAsUpdate by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    val isSaving by viewModel.isSavingEntry.collectAsState()
+    val isLoadingEntry by viewModel.isLoadingEntry.collectAsState()
     var validationErrorText by remember { mutableStateOf<String?>(null) }
 
     val initialAnswers by viewModel.initialAnswers.collectAsState()
@@ -76,12 +80,24 @@ fun FormSolveScreen(
         answersChanged || attributionsChanged || patientChanged || titleChanged
     }
 
+    // Drafts: unsaved new entries are kept so they survive the app closing.
+    LaunchedEffect(entryTitle, selectedPatient) {
+        viewModel.onDraftMetaChanged(entryTitle, selectedPatient?.uid)
+    }
+    var draftOfferedAt by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(template?.uid, isLoadingEntry) {
+        val t = template ?: return@LaunchedEffect
+        if (!isLoadingEntry && editingEntryUid == null && solveAnswers.isEmpty()) {
+            draftOfferedAt = viewModel.draftSavedAt(t.uid)
+        }
+    }
+
     // --- Safe Unsaved Exit Warning state ---
     var showSaveConfirmationDialog by remember { mutableStateOf(false) }
 
-    if (template == null) {
+    if (template == null || isLoadingEntry) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No Blueprint Available")
+            if (isLoadingEntry) CircularProgressIndicator() else Text("No Blueprint Available")
         }
         return
     }
@@ -101,37 +117,15 @@ fun FormSolveScreen(
     // --- Dynamic Conditional Engine Algorithm ---
     // Evaluates what fields are currently visible based on answers
     val visibleFieldsMap = remember(solveAnswers, fields) {
-        val result = mutableMapOf<String, List<FormField>>()
-        for ((secId, fList) in fields) {
-            val visibleList = fList.filter { field ->
-                val condition = field.conditionalLogicJson
-                if (condition.isNullOrBlank()) {
-                    true
-                } else {
-                    val parts = condition.split("==")
-                    if (parts.size == 2) {
-                        val parentFieldId = parts[0]
-                        val expectedValue = parts[1]
-                        val actualValue = solveAnswers[parentFieldId]
-                        actualValue == expectedValue
-                    } else {
-                        true
-                    }
-                }
-            }
-            result[secId] = visibleList
-        }
-        result
+        val visibleIds = ConditionalLogic.visibleFieldUids(fields.values.flatten(), solveAnswers)
+        fields.mapValues { (_, fList) -> fList.filter { it.uid in visibleIds } }
     }
 
     // --- Dynamic Progress Metrics ---
     val progressMetrics = remember(solveAnswers, visibleFieldsMap) {
         val allVisibleFields = visibleFieldsMap.values.flatten()
         val totalCount = allVisibleFields.size
-        val answeredCount = allVisibleFields.count { solveAnswers[it.uid]?.isNotBlank() == true }
-        
-        val requiredCount = allVisibleFields.count { it.isRequired }
-        val requiredAnsweredCount = allVisibleFields.count { it.isRequired && solveAnswers[it.uid]?.isNotBlank() == true }
+        val answeredCount = allVisibleFields.count { isAnswered(solveAnswers[it.uid]) }
 
         val percent = if (totalCount > 0) (answeredCount.toFloat() / totalCount.toFloat()) else 0f
         Triple(answeredCount, totalCount, percent)
@@ -161,7 +155,7 @@ fun FormSolveScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.clearSolveAnswers() }) {
+                    IconButton(onClick = { showClearConfirm = true }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Clear Answers", tint = MaterialTheme.colorScheme.primary)
                     }
                 },
@@ -183,14 +177,14 @@ fun FormSolveScreen(
                         Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(52.dp))
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = if (editingEntryUid != null) "Updated Successfully!" else "Submitted Successfully!",
+                            text = if (savedAsUpdate) "Updated Successfully!" else "Submitted Successfully!",
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = if (editingEntryUid != null) "Record updated in local EMR history database." else "Record filed into local EMR history database.",
+                            text = if (savedAsUpdate) "Record updated in local EMR history database." else "Record filed into local EMR history database.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                         )
@@ -353,12 +347,14 @@ fun FormSolveScreen(
                             )
                         }
 
-                        items(sectionFields) { field ->
+                        items(sectionFields, key = { it.uid }) { field ->
                             SolveFieldCard(
                                 field = field,
                                 options = optionsMap[field.uid] ?: emptyList(),
                                 currentAnswer = solveAnswers[field.uid] ?: "",
-                                onUpdateAnswer = { valStr -> viewModel.updateAns(field.uid, valStr) }
+                                onUpdateAnswer = { valStr -> viewModel.updateAns(field.uid, valStr) },
+                                attribution = solveAttributions[field.uid],
+                                onAttributionChange = { viewModel.updateProcedureAttribution(field.uid, it) }
                             )
                         }
                     }
@@ -384,13 +380,14 @@ fun FormSolveScreen(
                             // Run required field validation engine check
                             val allVisibleFields = visibleFieldsMap.values.flatten()
                             val missingRequired = allVisibleFields.find { 
-                                it.isRequired && (solveAnswers[it.uid].isNullOrBlank())
+                                it.isRequired && !isAnswered(solveAnswers[it.uid])
                             }
 
                             if (missingRequired != null) {
                                 validationErrorText = "Required answer missing: '${missingRequired.label}'"
                             } else {
                                 validationErrorText = null
+                                savedAsUpdate = editingEntryUid != null
                                 viewModel.saveEntry(
                                     template = template!!,
                                     patient = selectedPatient,
@@ -401,6 +398,7 @@ fun FormSolveScreen(
                                 )
                             }
                         },
+                        enabled = !isSaving,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
@@ -427,20 +425,24 @@ fun FormSolveScreen(
                 Button(
                     onClick = {
                         showSaveConfirmationDialog = false
-                        if (entryTitle.isNotBlank() || selectedPatient != null) {
-                            val targetTitle = entryTitle.ifBlank { "${template!!.name} Record" }
+                        // Same required-field check as the main save button; never leave without saving.
+                        val missingRequired = visibleFieldsMap.values.flatten().find {
+                            it.isRequired && !isAnswered(solveAnswers[it.uid])
+                        }
+                        if (missingRequired != null) {
+                            validationErrorText = "Required answer missing: '${missingRequired.label}'"
+                        } else {
                             viewModel.saveEntry(
                                 template = template!!,
                                 patient = selectedPatient,
-                                title = targetTitle,
+                                title = entryTitle.ifBlank { "${template!!.name} Record" },
                                 onSuccess = {
                                     onNavigateBack()
                                 }
                             )
-                        } else {
-                            onNavigateBack()
                         }
-                    }
+                    },
+                    enabled = !isSaving
                 ) {
                     Text("Save")
                 }
@@ -450,6 +452,7 @@ fun FormSolveScreen(
                     TextButton(
                         onClick = {
                             showSaveConfirmationDialog = false
+                            template?.let { viewModel.discardDraft(it.uid) }
                             viewModel.clearSolveAnswers()
                             onNavigateBack()
                         }
@@ -464,6 +467,74 @@ fun FormSolveScreen(
             }
         )
     }
+
+    draftOfferedAt?.let { savedAt ->
+        AlertDialog(
+            onDismissRequest = { draftOfferedAt = null },
+            title = { Text("Resume unsaved entry?") },
+            text = {
+                Text(
+                    "You started this form on " +
+                        java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(savedAt)) +
+                        " without saving it. Continue where you left off?"
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    template?.let { viewModel.restoreDraft(it.uid) }
+                    draftOfferedAt = null
+                }) {
+                    Text("Resume")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    template?.let { viewModel.discardDraft(it.uid) }
+                    draftOfferedAt = null
+                }) {
+                    Text("Start fresh")
+                }
+            }
+        )
+    }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Clear all answers?") },
+            text = { Text("All answers filled in this form will be removed.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.clearAnswersOnly()
+                        showClearConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Clear")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+// An unticked checkbox ("false" / {"completed":false}) is not an answer for required checks.
+private fun isAnswered(value: String?): Boolean {
+    if (value.isNullOrBlank() || value == "false") return false
+    if (value.startsWith("{")) {
+        return try {
+            val obj = org.json.JSONObject(value)
+            if (obj.has("choices")) obj.optString("choices").isNotBlank() else obj.optBoolean("completed", false)
+        } catch (e: Exception) {
+            true
+        }
+    }
+    return true
 }
 
 @Composable
@@ -472,6 +543,8 @@ fun SolveFieldCard(
     options: List<FormFieldOption>,
     currentAnswer: String,
     onUpdateAnswer: (String) -> Unit,
+    attribution: ProcedureAttributionData? = null,
+    onAttributionChange: (ProcedureAttributionData) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
@@ -521,6 +594,15 @@ fun SolveFieldCard(
                         modifier = Modifier.padding(start = 4.dp)
                     )
                 }
+            }
+
+            if (!field.hint.isNullOrBlank() && !isMinimized) {
+                Text(
+                    text = field.hint,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(start = 32.dp)
+                )
             }
 
             if (isMinimized) {
@@ -587,19 +669,21 @@ fun SolveFieldCard(
                             currentAnswer.toBoolean()
                         }
                     }
-                    val performedByMe = remember(currentAnswer) {
+                    // null = not answered yet; stays out of "Procedures I Performed" until answered.
+                    val performedByMe: Boolean? = remember(currentAnswer) {
                         if (field.isProcedure) {
                             try {
                                 if (currentAnswer.startsWith("{")) {
-                                    org.json.JSONObject(currentAnswer).optBoolean("performedByMe", false)
+                                    val obj = org.json.JSONObject(currentAnswer)
+                                    if (obj.has("performedByMe")) obj.optBoolean("performedByMe", false) else null
                                 } else {
-                                    false
+                                    null
                                 }
                             } catch (e: Exception) {
-                                false
+                                null
                             }
                         } else {
-                            false
+                            null
                         }
                     }
 
@@ -614,7 +698,9 @@ fun SolveFieldCard(
                                         val obj = org.json.JSONObject()
                                         obj.put("procedure", field.label)
                                         obj.put("completed", newChecked)
-                                        obj.put("performedByMe", performedByMe)
+                                        // Not asked: keep the previous default (false). Asked: only once answered.
+                                        if (!field.askIfPerformedByMe) obj.put("performedByMe", performedByMe ?: false)
+                                        else if (performedByMe != null) obj.put("performedByMe", performedByMe)
                                         onUpdateAnswer(obj.toString())
                                     } else {
                                         onUpdateAnswer(newChecked.toString())
@@ -629,7 +715,9 @@ fun SolveFieldCard(
                                         val obj = org.json.JSONObject()
                                         obj.put("procedure", field.label)
                                         obj.put("completed", newChecked)
-                                        obj.put("performedByMe", performedByMe)
+                                        // Not asked: keep the previous default (false). Asked: only once answered.
+                                        if (!field.askIfPerformedByMe) obj.put("performedByMe", performedByMe ?: false)
+                                        else if (performedByMe != null) obj.put("performedByMe", performedByMe)
                                         onUpdateAnswer(obj.toString())
                                     } else {
                                         onUpdateAnswer(newChecked.toString())
@@ -670,7 +758,7 @@ fun SolveFieldCard(
                                         }
                                     ) {
                                         RadioButton(
-                                            selected = performedByMe,
+                                            selected = performedByMe == true,
                                             onClick = {
                                                 val obj = org.json.JSONObject()
                                                 obj.put("procedure", field.label)
@@ -694,7 +782,7 @@ fun SolveFieldCard(
                                         }
                                     ) {
                                         RadioButton(
-                                            selected = !performedByMe,
+                                            selected = performedByMe == false,
                                             onClick = {
                                                 val obj = org.json.JSONObject()
                                                 obj.put("procedure", field.label)
@@ -755,7 +843,10 @@ fun SolveFieldCard(
                 "number" -> {
                     OutlinedTextField(
                         value = currentAnswer,
-                        onValueChange = onUpdateAnswer,
+                        onValueChange = { typed ->
+                            // Deleting is always allowed so older free-text answers (e.g. "12 kg") can be corrected.
+                            if (typed.length < currentAnswer.length || Regex("^-?\\d*[.,]?\\d*$").matches(typed)) onUpdateAnswer(typed)
+                        },
                         placeholder = { Text("Numeric measurement...") },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -798,6 +889,15 @@ fun SolveFieldCard(
                             onDismissRequest = { expanded = false },
                             modifier = Modifier.fillMaxWidth(0.9f)
                         ) {
+                            if (currentAnswer.isNotBlank()) {
+                                DropdownMenuItem(
+                                    text = { Text("Clear selection", color = MaterialTheme.colorScheme.error) },
+                                    onClick = {
+                                        onUpdateAnswer("")
+                                        expanded = false
+                                    }
+                                )
+                            }
                             options.forEach { opt ->
                                 DropdownMenuItem(
                                     text = { Text(opt.label) },
@@ -959,7 +1059,7 @@ fun SolveFieldCard(
                         }
                     }
                     val choicePerformedMap = remember(currentAnswer) {
-                        val map = mutableMapOf<String, Boolean>()
+                        val map = mutableMapOf<String, Boolean>() // missing key = not answered yet
                         if (field.isProcedure) {
                             try {
                                 if (currentAnswer.startsWith("{")) {
@@ -1021,9 +1121,11 @@ fun SolveFieldCard(
                                 for (choice in newSet) {
                                     if (choicesPerf.has(choice)) {
                                         newPerfObj.put(choice, choicesPerf.getBoolean(choice))
-                                    } else {
-                                        newPerfObj.put(choice, true) // default to true (performed by me)
+                                    } else if (!field.askIfPerformedByMe) {
+                                        // Not asked: keep the previous default so existing logbooks count the same way.
+                                        newPerfObj.put(choice, true)
                                     }
+                                    // Asked: left unset until the user answers "Did I perform this?".
                                 }
                                 obj.put("choices_perf", newPerfObj)
                                 onUpdateAnswer(obj.toString())
@@ -1053,7 +1155,7 @@ fun SolveFieldCard(
                                     },
                                     isProcedure = field.isProcedure,
                                     askIfPerformedByMe = field.askIfPerformedByMe,
-                                    choicePerfVal = choicePerformedMap[opt.label] ?: true,
+                                    choicePerfVal = choicePerformedMap[opt.label],
                                     onPerformanceChange = { perf -> updateChoicePerformance(opt.label, perf) },
                                     isHorizontal = true
                                 )
@@ -1071,7 +1173,7 @@ fun SolveFieldCard(
                                     },
                                     isProcedure = field.isProcedure,
                                     askIfPerformedByMe = field.askIfPerformedByMe,
-                                    choicePerfVal = choicePerformedMap[opt.label] ?: true,
+                                    choicePerfVal = choicePerformedMap[opt.label],
                                     onPerformanceChange = { perf -> updateChoicePerformance(opt.label, perf) },
                                     isHorizontal = false
                                 )
@@ -1079,91 +1181,6 @@ fun SolveFieldCard(
                         }
                     }
 
-                    /*
-                    if (false) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            standardOptions.forEach { opt ->
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            val newSet = if (selectedSet.contains(opt.label)) {
-                                                selectedSet - opt.label
-                                            } else {
-                                                selectedSet + opt.label
-                                            }
-                                            updateGroupAnswer(newSet)
-                                        }
-                                        .padding(vertical = 4.dp)
-                                ) {
-                                    Checkbox(
-                                        checked = selectedSet.contains(opt.label),
-                                        onCheckedChange = {
-                                            val newSet = if (it) {
-                                                selectedSet + opt.label
-                                            } else {
-                                                selectedSet - opt.label
-                                            }
-                                            updateGroupAnswer(newSet)
-                                        }
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(opt.label, fontSize = 13.sp)
-                                }
-
-                                if (field.isProcedure && field.askIfPerformedByMe && selectedSet.contains(opt.label)) {
-                                    val choicePerfVal = choicePerformedMap[opt.label] ?: true
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(start = 36.dp, bottom = 6.dp)
-                                            .background(
-                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                                                shape = RoundedCornerShape(6.dp)
-                                            )
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Text(
-                                            "Did I perform this?",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.clickable {
-                                                updateChoicePerformance(opt.label, true)
-                                            }
-                                        ) {
-                                            RadioButton(
-                                                selected = choicePerfVal,
-                                                onClick = { updateChoicePerformance(opt.label, true) }
-                                            )
-                                            Spacer(modifier = Modifier.width(2.dp))
-                                            Text("Yes", fontSize = 11.sp)
-                                        }
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.clickable {
-                                                updateChoicePerformance(opt.label, false)
-                                            }
-                                        ) {
-                                            RadioButton(
-                                                selected = !choicePerfVal,
-                                                onClick = { updateChoicePerformance(opt.label, false) }
-                                            )
-                                            Spacer(modifier = Modifier.width(2.dp))
-                                            Text("No", fontSize = 11.sp)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    */
 
                         if (advancedOptions.isNotEmpty()) {
                             AnimatedVisibility(
@@ -1209,7 +1226,7 @@ fun SolveFieldCard(
                                             }
 
                                             if (field.isProcedure && field.askIfPerformedByMe && selectedSet.contains(opt.label)) {
-                                                val choicePerfVal = choicePerformedMap[opt.label] ?: true
+                                                val choicePerfVal = choicePerformedMap[opt.label]
                                                 Row(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
@@ -1235,7 +1252,7 @@ fun SolveFieldCard(
                                                         }
                                                     ) {
                                                         RadioButton(
-                                                            selected = choicePerfVal,
+                                                            selected = choicePerfVal == true,
                                                             onClick = { updateChoicePerformance(opt.label, true) }
                                                         )
                                                         Spacer(modifier = Modifier.width(2.dp))
@@ -1248,7 +1265,7 @@ fun SolveFieldCard(
                                                         }
                                                     ) {
                                                         RadioButton(
-                                                            selected = !choicePerfVal,
+                                                            selected = choicePerfVal == false,
                                                             onClick = { updateChoicePerformance(opt.label, false) }
                                                         )
                                                         Spacer(modifier = Modifier.width(2.dp))
@@ -1364,6 +1381,41 @@ fun SolveFieldCard(
                 }
             }
         }
+
+            // Supervisor / witness for a completed procedure (stored in the entry's attributions).
+            if (field.isProcedure && !isMinimized && ProcedureAnswer.completedItems(currentAnswer).isNotEmpty()) {
+                val current = attribution ?: ProcedureAttributionData(fieldId = field.uid, providerType = "")
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(8.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    OutlinedTextField(
+                        value = current.supervisorWitness,
+                        onValueChange = { onAttributionChange(current.copy(supervisorWitness = it)) },
+                        label = { Text("Supervisor / witness (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clickable(enabled = current.supervisorWitness.isNotBlank()) {
+                                onAttributionChange(current.copy(isWitnessVerified = !current.isWitnessVerified))
+                            }
+                    ) {
+                        Checkbox(
+                            checked = current.isWitnessVerified,
+                            onCheckedChange = { onAttributionChange(current.copy(isWitnessVerified = it)) },
+                            enabled = current.supervisorWitness.isNotBlank()
+                        )
+                        Text("Verified by supervisor", fontSize = 12.sp)
+                    }
+                }
+            }
     }
 }
 }
@@ -1375,7 +1427,7 @@ fun CheckboxOptionItem(
     onCheckedChange: (Boolean) -> Unit,
     isProcedure: Boolean,
     askIfPerformedByMe: Boolean,
-    choicePerfVal: Boolean,
+    choicePerfVal: Boolean?,
     onPerformanceChange: (Boolean) -> Unit,
     isHorizontal: Boolean
 ) {
@@ -1423,7 +1475,7 @@ fun CheckboxOptionItem(
                         modifier = Modifier.clickable { onPerformanceChange(true) }
                     ) {
                         RadioButton(
-                            selected = choicePerfVal,
+                            selected = choicePerfVal == true,
                             onClick = { onPerformanceChange(true) }
                         )
                         Spacer(modifier = Modifier.width(4.dp))
@@ -1434,7 +1486,7 @@ fun CheckboxOptionItem(
                         modifier = Modifier.clickable { onPerformanceChange(false) }
                     ) {
                         RadioButton(
-                            selected = !choicePerfVal,
+                            selected = choicePerfVal == false,
                             onClick = { onPerformanceChange(false) }
                         )
                         Spacer(modifier = Modifier.width(4.dp))

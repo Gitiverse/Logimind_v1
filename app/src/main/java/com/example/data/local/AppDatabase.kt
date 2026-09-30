@@ -17,7 +17,7 @@ import com.example.data.model.*
         EntryAnswer::class
     ],
     version = 3,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun medicalFormDao(): MedicalFormDao
@@ -33,7 +33,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "medical_form_database"
                 )
-                .fallbackToDestructiveMigration()
+                // No destructive fallback: version 3 holds users' clinical data. Any future
+                // schema change must ship a real Migration.
                 .build()
                 INSTANCE = instance
                 instance

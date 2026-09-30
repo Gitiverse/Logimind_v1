@@ -1,6 +1,7 @@
 package com.example.data.service
 
 import com.example.data.model.FormEntry
+import com.example.data.model.ProcedureAnswer
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -10,8 +11,8 @@ import com.squareup.moshi.JsonClass
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.Header
 import retrofit2.http.POST
-import retrofit2.http.Query
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -20,6 +21,7 @@ data class NormalizedMedicalLog(
     val uid: String,
     val title: String,
     val dateStr: String,
+    val createdAt: Long = 0L,
     val patientName: String,
     val templateName: String,
     val chiefComplaintsOrSymptoms: List<String>,
@@ -50,53 +52,59 @@ object AiSummaryService {
     @Volatile
     var customApiKey: String = ""
 
-    private val format = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault())
+    // Written only when data is missing; the summary never invents clinical content.
+    private const val NOT_RECORDED = "Not recorded"
 
-    // 1. Data Normalization pipeline - Converts dynamic schema logs into structured clinical fields
-    fun normalizeLogs(entries: List<FormEntry>): List<NormalizedMedicalLog> {
+    // 1. Data Normalization pipeline - Converts dynamic schema logs into structured clinical fields.
+    // Answers are keyed by field UID, so classification uses the question label from fieldLabelMap.
+    fun normalizeLogs(entries: List<FormEntry>, fieldLabelMap: Map<String, String> = emptyMap()): List<NormalizedMedicalLog> {
+        val format = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault())
         return entries.map { entry ->
             val symptomsList = mutableListOf<String>()
             val proceduresList = mutableListOf<String>()
             val medsList = mutableListOf<String>()
             val proceduresMeList = mutableListOf<String>()
             val proceduresOthersList = mutableListOf<String>()
-            var outcome = "Stable / Routine"
-            var notes = "None recorded"
-            var performer = "On-Duty Clinical Staff"
+            val outcomes = mutableListOf<String>()
+            val notesList = mutableListOf<String>()
+            val otherAnswers = mutableListOf<String>()
+            var performer = NOT_RECORDED
  
             try {
                 if (!entry.answersJson.isBlank()) {
                     val answers = JSONObject(entry.answersJson)
                     val keys = answers.keys()
                     while (keys.hasNext()) {
-                        val key = keys.next().lowercase()
+                        val key = keys.next()
                         val value = answers.optString(key)
-                        
-                        // Parse procedure JSON format if present
-                        if (value.startsWith("{") && value.contains("procedure")) {
-                            try {
-                                val obj = JSONObject(value)
-                                if (obj.optBoolean("completed", false)) {
-                                    val procLabel = obj.optString("procedure")
-                                    if (obj.optBoolean("performedByMe", false)) {
-                                        proceduresMeList.add(procLabel)
-                                    } else {
-                                        proceduresOthersList.add(procLabel)
-                                    }
-                                }
-                            } catch (e: Exception) {}
+                        if (value.isBlank()) continue
+                        val label = fieldLabelMap[key] ?: key.replace("field-", "").replace("-", " ")
+                        val match = label.lowercase()
+
+                        if (ProcedureAnswer.isProcedure(value)) {
+                            for (item in ProcedureAnswer.completedItems(value)) {
+                                if (item.performedByMe) proceduresMeList.add(item.name) else proceduresOthersList.add(item.name)
+                            }
                         } else {
-                            // Infer structure based on key names
-                            if (key.contains("symptom") || key.contains("history") || key.contains("complaint") || key.contains("severity")) {
-                                symptomsList.add("${key.replace("field-", "").replace("-", " ")}: $value")
-                            } else if (key.contains("bp") || key.contains("vital") || key.contains("check") || key.contains("stable")) {
-                                outcome = "Patient Vitals check: $value"
-                            } else if (key.contains("technique") || key.contains("procedure") || key.contains("bypass") || key.contains("airway")) {
-                                proceduresList.add(value)
-                            } else if (key.contains("med") || key.contains("drug") || key.contains("dose")) {
-                                medsList.add(value)
-                            } else if (key.contains("note") || key.contains("comment") || key.contains("description")) {
-                                notes = value
+                            val display = when (value) {
+                                "true" -> "Yes"
+                                "false" -> "No"
+                                else -> value
+                            }
+                            val line = "$label: $display"
+                            // Infer structure from the question label; anything else is still reported.
+                            if (match.contains("symptom") || match.contains("history") || match.contains("complaint") || match.contains("severity")) {
+                                symptomsList.add(line)
+                            } else if (match.contains("bp") || match.contains("vital") || match.contains("stable") || match.contains("outcome")) {
+                                outcomes.add(line)
+                            } else if (match.contains("technique") || match.contains("procedure") || match.contains("bypass") || match.contains("airway")) {
+                                proceduresList.add(line)
+                            } else if (match.contains("med") || match.contains("drug") || match.contains("dose")) {
+                                medsList.add(line)
+                            } else if (match.contains("note") || match.contains("comment") || match.contains("description")) {
+                                notesList.add(line)
+                            } else {
+                                otherAnswers.add(line)
                             }
                         }
                     }
@@ -122,21 +130,22 @@ object AiSummaryService {
                     }
                 }
             } catch (e: Exception) {
-                notes = "Error processing: ${e.localizedMessage}"
+                notesList.add("Error processing: ${e.localizedMessage}")
             }
  
             NormalizedMedicalLog(
                 uid = entry.uid,
                 title = entry.title,
                 dateStr = format.format(Date(entry.createdAt)),
+                createdAt = entry.createdAt,
                 patientName = entry.patientName ?: "Theatre Profile",
                 templateName = entry.templateName ?: "Dynamic Checklist",
-                chiefComplaintsOrSymptoms = symptomsList.distinct(),
+                chiefComplaintsOrSymptoms = (symptomsList + otherAnswers).distinct(),
                 proceduresObserved = proceduresList.distinct(),
                 medicationsListed = medsList.distinct(),
-                outcomesAndStability = outcome,
+                outcomesAndStability = outcomes.joinToString("; ").ifBlank { NOT_RECORDED },
                 onDutyPerformer = performer,
-                clinicalNotes = notes,
+                clinicalNotes = notesList.joinToString("; ").ifBlank { NOT_RECORDED },
                 proceduresPerformedByMe = proceduresMeList.distinct(),
                 proceduresPerformedByOthers = proceduresOthersList.distinct()
             )
@@ -187,7 +196,7 @@ object AiSummaryService {
                     }
                     
                     sb.append("Current status is documented as: ${logs.map { it.outcomesAndStability }.joinToString("; ")}. ")
-                    sb.append("The care team has authorized standard ongoing follow-ups. Execution by: ${logs.map { it.onDutyPerformer }.distinct().joinToString(", ")}.")
+                    sb.append("Recorded by: ${logs.map { it.onDutyPerformer }.distinct().joinToString(", ")}.")
                 }
                 
                 "bullets" -> {
@@ -213,7 +222,7 @@ object AiSummaryService {
                     if (meds.isNotEmpty()) {
                         sb.append("• Pharmacotherapy: ${meds.joinToString(", ")}\n")
                     } else {
-                        sb.append("• Pharmacotherapy: No unique surgical or ICU medications compiled.\n")
+                        sb.append("• Pharmacotherapy: $NOT_RECORDED\n")
                     }
                     
                     sb.append("• Overall Patient Outcomes: ${logs.map { it.outcomesAndStability }.distinct().joinToString("; ")}\n")
@@ -223,7 +232,7 @@ object AiSummaryService {
                 "timeline" -> {
                     sb.append("CLINICAL MEDICAL RECORD TIMELINE: $patientName\n")
                     sb.append("========================================\n")
-                    for (log in logs.sortedBy { it.dateStr }) {
+                    for (log in logs.sortedBy { it.createdAt }) {
                         sb.append("${log.dateStr} [${log.templateName}]:\n")
                         if (log.proceduresPerformedByMe.isNotEmpty()) {
                             sb.append("  - Personally Performed: ${log.proceduresPerformedByMe.joinToString(", ")}\n")
@@ -248,7 +257,7 @@ object AiSummaryService {
                     if (complaints.isNotEmpty()) {
                         complaints.forEach { sb.append("   - $it\n") }
                     } else {
-                        sb.append("   - No extreme pathological severity signals detected; routine findings.\n")
+                        sb.append("   - $NOT_RECORDED\n")
                     }
                     
                     sb.append("\n2. EXECUTED THERAPEUTIC PROCEDURES:\n")
@@ -263,7 +272,7 @@ object AiSummaryService {
                         pbOthers.forEach { sb.append("     - $it\n") }
                     }
                     if (pbMe.isEmpty() && pbOthers.isEmpty()) {
-                        sb.append("   - Standard non-surgical clinical diagnostics and vital monitoring.\n")
+                        sb.append("   - $NOT_RECORDED\n")
                     }
                     
                     sb.append("\n3. VITAL OUTCOMES & STABILITY MARGINS:\n")
@@ -276,7 +285,7 @@ object AiSummaryService {
                     if (meds.isNotEmpty()) {
                         meds.forEach { sb.append("   - $it\n") }
                     } else {
-                        sb.append("   - Maintenance fluids only; no intensive active therapy ordered.\n")
+                        sb.append("   - $NOT_RECORDED\n")
                     }
 
                     sb.append("\n5. COMPLICATIONS & CLINICAL NOTES:\n")
@@ -300,7 +309,7 @@ object AiSummaryService {
             style: String
         ): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             if (AiSummaryService.customApiKey.isBlank()) {
-                return@withContext "⚠️ GEMINI API KEY MISSING\n\nPlease enter your personal Gemini API key in the Settings (gear icon at top right) to enable beautiful AI-powered clinical case summaries."
+                return@withContext "⚠️ No Gemini API key saved.\n\nOpen Settings (gear icon, top right) and paste your Gemini API key, or choose \"LogiMind Local\" to summarise without internet."
             }
 
             // Prompt construction for server side execution
@@ -333,7 +342,7 @@ object AiSummaryService {
                 if (!responseText.isNullOrBlank()) {
                     return@withContext responseText
                 } else {
-                    return@withContext "⚠️ API responded successfully but returned an empty summary. Please try again."
+                    return@withContext "⚠️ Gemini returned an empty summary. Please try again."
                 }
             } catch (e: retrofit2.HttpException) {
                 val errDetails = try {
@@ -341,13 +350,16 @@ object AiSummaryService {
                 } catch (ex: Throwable) {
                     ""
                 }
-                var cleanMsg = e.localizedMessage ?: "HTTP Error ${e.code()}"
-                if (errDetails.isNotBlank()) {
-                    cleanMsg += "\n\nDetails: $errDetails"
+                val reason = when (e.code()) {
+                    400, 401, 403 -> "The API key was not accepted. Check it in Settings."
+                    429 -> "Gemini's usage limit was reached. Wait a little and try again, or check your quota in Google AI Studio."
+                    in 500..599 -> "Gemini is having problems right now. Try again later."
+                    else -> "Gemini could not create the summary."
                 }
-                return@withContext "❌ GEMINI API ERROR (${e.code()})\n\n$cleanMsg\n\nMake sure your API key is correct and your Google AI Studio account has billing/quota active."
+                val details = if (errDetails.isNotBlank()) "\n\nTechnical details (error ${e.code()}): ${errDetails.take(300)}" else ""
+                return@withContext "❌ $reason$details"
             } catch (e: Throwable) {
-                return@withContext "❌ GEMINI API ERROR\n\nThere was a problem calling the Gemini API: ${e.localizedMessage ?: e.toString()}\n\nMake sure your API key is correct and you have an active internet connection."
+                return@withContext "❌ Could not reach Gemini. Check the internet connection and try again.\n\nTechnical details: ${e.localizedMessage ?: e.toString()}"
             }
         }
     }
@@ -363,9 +375,7 @@ object AiSummaryService {
             logs: List<NormalizedMedicalLog>,
             style: String
         ): String {
-            return "🟢 [OPENAI PLATFORM LINK GATEWAY ACTIVE]\n" +
-                   "Gated behind SaaS API plan weights. When active, requests route to 'https://api.openai.com/v1/chat/completions' with model 'gpt-4-turbo'.\n\n" +
-                   "SaaS billing integration holds tokens, counts request payloads, and handles dynamic clinical logs."
+            return "⚠️ NOT AVAILABLE YET\n\nThe GPT-4 engine is not connected in this version. Use LogiMind Local or Gemini."
         }
     }
 
@@ -380,8 +390,7 @@ object AiSummaryService {
             logs: List<NormalizedMedicalLog>,
             style: String
         ): String {
-            return "🟣 [ANTHROPIC CLAUDE EDGE GATEWAY ACTIVE]\n" +
-                   "Uses native AWS Bedrock or Anthropic direct endpoints. Complete offline abstract pipeline is fully hot-swappable with Claude 3.5 Sonnet."
+            return "⚠️ NOT AVAILABLE YET\n\nThe Claude engine is not connected in this version. Use LogiMind Local or Gemini."
         }
     }
 }
@@ -416,7 +425,8 @@ data class GeminiResponse(
 interface GeminiApiService {
     @POST("v1beta/models/gemini-2.5-flash-lite:generateContent")
     suspend fun generateContent(
-        @Query("key") apiKey: String,
+        // Header, not a URL query parameter, so the key does not end up in URL logs.
+        @Header("x-goog-api-key") apiKey: String,
         @Body request: GeminiRequest
     ): GeminiResponse
 }

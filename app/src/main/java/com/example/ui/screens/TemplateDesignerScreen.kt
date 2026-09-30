@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.onFocusChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +53,13 @@ fun TemplateDesignerScreen(
     // --- Save Confirmation State Triggers ---
     var hasMadeChanges by remember { mutableStateOf(false) }
     var showSaveConfirmationDialog by remember { mutableStateOf(false) }
+
+    var sectionToDelete by remember { mutableStateOf<FormSection?>(null) }
+    var fieldToDelete by remember { mutableStateOf<FormField?>(null) }
+    var optionToDelete by remember { mutableStateOf<FormFieldOption?>(null) }
+    val fieldLabels = remember(fields) { fields.values.flatten().associate { it.uid to it.label } }
+    // Drag callbacks outlive recompositions; read the latest sections, not the list from first composition.
+    val currentSections by rememberUpdatedState(sections)
 
     var activeDraggedSectionId by remember { mutableStateOf<String?>(null) }
     var activeSectionDragOffset by remember { mutableStateOf(Offset.Zero) }
@@ -157,7 +166,7 @@ fun TemplateDesignerScreen(
                     }
                 }
             } else {
-                items(sections) { section ->
+                items(sections, key = { it.uid }) { section ->
                     val id = section.uid
                     val isDragging = activeDraggedSectionId == id
 
@@ -200,8 +209,8 @@ fun TemplateDesignerScreen(
                                             }
                                         }
                                         if (nearestId != null && minDistance < 320f) {
-                                            val fromSec = sections.find { it.uid == id }
-                                            val toSec = sections.find { it.uid == nearestId }
+                                            val fromSec = currentSections.find { it.uid == id }
+                                            val toSec = currentSections.find { it.uid == nearestId }
                                             if (fromSec != null && toSec != null) {
                                                 viewModel.swapSectionOrders(fromSec, toSec)
                                                 hasMadeChanges = true
@@ -232,22 +241,24 @@ fun TemplateDesignerScreen(
                         fields = fields[section.uid] ?: emptyList(),
                         optionsMap = options,
                         onAddOption = { selectedFieldForOptionAdd = it; hasMadeChanges = true },
-                        onDeleteOption = { viewModel.deleteOption(it); hasMadeChanges = true },
+                        onDeleteOption = { optionToDelete = it },
                         onAddField = { selectedSectionForFieldAdd = section; hasMadeChanges = true },
-                        onDeleteSection = { viewModel.deleteSection(section); hasMadeChanges = true },
+                        onDeleteSection = { sectionToDelete = section },
                         onUpdateSectionTitle = { viewModel.updateSectionTitle(section, it); hasMadeChanges = true },
-                        onDeleteField = { viewModel.deleteField(it); hasMadeChanges = true },
+                        onDeleteField = { fieldToDelete = it },
                         onDuplicateField = { viewModel.duplicateField(it); hasMadeChanges = true },
                         onToggleRequired = { field, req -> viewModel.updateFieldRequired(field, req); hasMadeChanges = true },
                         onToggleStartMinimized = { field, min -> viewModel.updateFieldStartMinimized(field, min); hasMadeChanges = true },
                         onLayoutChange = { field, isHor -> viewModel.updateFieldLayout(field, isHor); hasMadeChanges = true },
                         onUpdateLabel = { field, label -> viewModel.updateFieldLabel(field, label); hasMadeChanges = true },
+                        onUpdateHint = { field, hint -> viewModel.updateFieldHint(field, hint); hasMadeChanges = true },
                         onProcedureChange = { field, isProc -> viewModel.updateFieldIsProcedure(field, isProc); hasMadeChanges = true },
                         onAskIfPerformedChange = { field, ask -> viewModel.updateFieldAskIfPerformedByMe(field, ask); hasMadeChanges = true },
                         onMoveSectionUp = { viewModel.moveSectionUp(section); hasMadeChanges = true },
                         onMoveSectionDown = { viewModel.moveSectionDown(section); hasMadeChanges = true },
                         onMoveFieldUp = { viewModel.moveFieldUp(it); hasMadeChanges = true },
                         onMoveFieldDown = { viewModel.moveFieldDown(it); hasMadeChanges = true },
+                        fieldLabels = fieldLabels,
                         modifier = dragModifier
                     )
                 }
@@ -305,6 +316,8 @@ fun TemplateDesignerScreen(
         // Procedure attribute flags
         var isProcedure by remember { mutableStateOf(false) }
         var askIfPerformedByMe by remember { mutableStateOf(false) }
+        var ruleError by remember { mutableStateOf<String?>(null) }
+        var fieldHint by remember { mutableStateOf("") }
 
         val allAvailableFields = remember(fields) {
             fields.values.flatten().filter { it.type == "dropdown" || it.type == "radio_group" }
@@ -314,12 +327,23 @@ fun TemplateDesignerScreen(
             onDismissRequest = { selectedSectionForFieldAdd = null },
             title = { Text("Create Visual Field") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                ) {
                     OutlinedTextField(
                         value = fieldLabel,
                         onValueChange = { fieldLabel = it },
                         label = { Text("Question Label Text") },
                         placeholder = { Text("e.g. Any prior anesthesia issues?") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = fieldHint,
+                        onValueChange = { fieldHint = it },
+                        label = { Text("Hint for whoever fills the form (optional)") },
+                        placeholder = { Text("e.g. Include ASA grade") },
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -462,10 +486,15 @@ fun TemplateDesignerScreen(
 
                             OutlinedTextField(
                                 value = dependOnValue,
-                                onValueChange = { dependOnValue = it },
+                                onValueChange = { dependOnValue = it; ruleError = null },
                                 label = { Text("Matches value (e.g. Yes)") },
                                 modifier = Modifier.fillMaxWidth()
                             )
+                            val parentChoices = options[dependOnFieldId].orEmpty().map { it.label }
+                            if (parentChoices.isNotEmpty()) {
+                                Text("Choices: ${parentChoices.joinToString(" / ")}", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                            }
+                            ruleError?.let { Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
@@ -473,15 +502,25 @@ fun TemplateDesignerScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (fieldLabel.isNotBlank()) {
+                        // The rule must name a trigger question and one of its choices (matched exactly on save).
+                        val parentChoices = options[dependOnFieldId].orEmpty().map { it.label }
+                        val matchedValue = parentChoices.find { it.equals(dependOnValue.trim(), ignoreCase = true) }
+                        ruleError = when {
+                            !hasConditionalDependency -> null
+                            dependOnFieldId.isBlank() -> "Select the trigger question."
+                            matchedValue == null -> "The value must be one of the trigger question's choices."
+                            else -> null
+                        }
+                        if (fieldLabel.isNotBlank() && ruleError == null) {
                             viewModel.addFieldToActive(
                                 sectionId = section.uid,
                                 type = selectedType,
                                 label = fieldLabel,
-                                conditionalFieldUid = if (hasConditionalDependency) dependOnFieldId.ifBlank { null } else null,
-                                conditionalValue = if (hasConditionalDependency) dependOnValue.ifBlank { null } else null,
+                                conditionalFieldUid = if (hasConditionalDependency) dependOnFieldId else null,
+                                conditionalValue = if (hasConditionalDependency) matchedValue else null,
                                 isProcedure = isProcedure && (selectedType == "checkbox" || selectedType == "checkbox_group"),
-                                askIfPerformedByMe = askIfPerformedByMe && isProcedure && (selectedType == "checkbox" || selectedType == "checkbox_group")
+                                askIfPerformedByMe = askIfPerformedByMe && isProcedure && (selectedType == "checkbox" || selectedType == "checkbox_group"),
+                                hint = fieldHint
                             )
                             hasMadeChanges = true
                             selectedSectionForFieldAdd = null
@@ -504,6 +543,8 @@ fun TemplateDesignerScreen(
         val field = selectedFieldForOptionAdd!!
         var optionLabel by remember { mutableStateOf("") }
         var isAdvanced by remember { mutableStateOf(false) }
+        // Checkbox-group answers are stored comma-separated, so a comma would split one choice in two.
+        val commaNotAllowed = field.type == "checkbox_group" && optionLabel.contains(",")
         AlertDialog(
             onDismissRequest = { selectedFieldForOptionAdd = null },
             title = { Text("Create Checklist Value", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
@@ -515,7 +556,11 @@ fun TemplateDesignerScreen(
                         label = { Text("Value Label") },
                         placeholder = { Text("e.g. Low Risk") },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        isError = commaNotAllowed,
+                        supportingText = if (commaNotAllowed) {
+                            { Text("Commas are not allowed in multiple-checkbox choices.") }
+                        } else null
                     )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -548,8 +593,8 @@ fun TemplateDesignerScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (optionLabel.isNotBlank()) {
-                            viewModel.addOptionToField(field.uid, optionLabel, isAdvanced)
+                        if (optionLabel.isNotBlank() && !commaNotAllowed) {
+                            viewModel.addOptionToField(field.uid, optionLabel.trim(), isAdvanced)
                             hasMadeChanges = true
                             selectedFieldForOptionAdd = null
                         }
@@ -571,8 +616,8 @@ fun TemplateDesignerScreen(
     if (showSaveConfirmationDialog) {
         AlertDialog(
             onDismissRequest = { showSaveConfirmationDialog = false },
-            title = { Text("Save changes before leaving?", fontWeight = FontWeight.Bold) },
-            text = { Text("You have unsaved changes in this Assessment blueprint session. Discarding will rollback edits.") },
+            title = { Text("Leave the designer?", fontWeight = FontWeight.Bold) },
+            text = { Text("Your changes to this blueprint are saved automatically as you make them.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -581,26 +626,44 @@ fun TemplateDesignerScreen(
                         onNavigateBack()
                     }
                 ) {
-                    Text("Save")
+                    Text("Done")
                 }
             },
             dismissButton = {
                 Row {
-                    TextButton(
-                        onClick = {
-                            showSaveConfirmationDialog = false
-                            hasMadeChanges = false
-                            onNavigateBack()
-                        }
-                    ) {
-                        Text("Discard", color = MaterialTheme.colorScheme.error)
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
                     TextButton(onClick = { showSaveConfirmationDialog = false }) {
                         Text("Cancel")
                     }
                 }
             }
+        )
+    }
+
+    sectionToDelete?.let { sec ->
+        val count = fields[sec.uid]?.size ?: 0
+        ConfirmDeleteDialog(
+            title = "Delete group?",
+            message = "Delete '${sec.title}'${if (count > 0) " and its $count question(s)" else ""}? Answers already saved in log entries are kept.",
+            onConfirm = { viewModel.deleteSection(sec); hasMadeChanges = true; sectionToDelete = null },
+            onDismiss = { sectionToDelete = null }
+        )
+    }
+    fieldToDelete?.let { f ->
+        val dependents = fields.values.flatten().count { ConditionalLogic.parse(it.conditionalLogicJson)?.first == f.uid }
+        ConfirmDeleteDialog(
+            title = "Delete question?",
+            message = "Delete '${f.label}'? Answers already saved in log entries are kept." +
+                if (dependents > 0) " $dependents question(s) shown only when this one is answered will then always be shown." else "",
+            onConfirm = { viewModel.deleteField(f); hasMadeChanges = true; fieldToDelete = null },
+            onDismiss = { fieldToDelete = null }
+        )
+    }
+    optionToDelete?.let { o ->
+        ConfirmDeleteDialog(
+            title = "Delete choice?",
+            message = "Delete the choice '${o.label}'?",
+            onConfirm = { viewModel.deleteOption(o); hasMadeChanges = true; optionToDelete = null },
+            onDismiss = { optionToDelete = null }
         )
     }
 
@@ -656,6 +719,7 @@ fun SectionCard(
     onToggleRequired: (FormField, Boolean) -> Unit,
     onToggleStartMinimized: (FormField, Boolean) -> Unit,
     onUpdateLabel: (FormField, String) -> Unit,
+    onUpdateHint: (FormField, String) -> Unit = { _, _ -> },
     onMoveSectionUp: () -> Unit,
     onMoveSectionDown: () -> Unit,
     onMoveFieldUp: (FormField) -> Unit,
@@ -663,6 +727,7 @@ fun SectionCard(
     onLayoutChange: (FormField, Boolean) -> Unit,
     onProcedureChange: (FormField, Boolean) -> Unit,
     onAskIfPerformedChange: (FormField, Boolean) -> Unit,
+    fieldLabels: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     var isEditingTitle by remember { mutableStateOf(false) }
@@ -819,11 +884,13 @@ fun SectionCard(
                             onRequiredChange = { onToggleRequired(field, it) },
                             onStartMinimizedChange = { onToggleStartMinimized(field, it) },
                             onLabelChange = { onUpdateLabel(field, it) },
+                            onHintChange = { onUpdateHint(field, it) },
                             onMoveUp = { onMoveFieldUp(field) },
                             onMoveDown = { onMoveFieldDown(field) },
                             onLayoutChange = { isHor -> onLayoutChange(field, isHor) },
                             onProcedureChange = { onProcedureChange(field, it) },
-                            onAskIfPerformedChange = { onAskIfPerformedChange(field, it) }
+                            onAskIfPerformedChange = { onAskIfPerformedChange(field, it) },
+                            fieldLabels = fieldLabels
                         )
                     }
                 }
@@ -857,14 +924,34 @@ fun FieldDesignerRow(
     onRequiredChange: (Boolean) -> Unit,
     onStartMinimizedChange: (Boolean) -> Unit,
     onLabelChange: (String) -> Unit,
+    onHintChange: (String) -> Unit = {},
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onLayoutChange: (Boolean) -> Unit,
     onProcedureChange: (Boolean) -> Unit,
     onAskIfPerformedChange: (Boolean) -> Unit,
+    fieldLabels: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     val isConditional = field.conditionalLogicJson != null
+    val ruleText = ConditionalLogic.parse(field.conditionalLogicJson)?.let { (parent, value) ->
+        "IF ${fieldLabels[parent] ?: "deleted question"} = $value"
+    } ?: "IF ${field.conditionalLogicJson}"
+
+    // Edited locally and saved when the field loses focus (or the row leaves the screen),
+    // instead of a database write and full reload on every keystroke.
+    var labelText by remember(field.uid, field.label) { mutableStateOf(field.label) }
+    val latestLabel by rememberUpdatedState(labelText)
+    val commitLabel = {
+        if (latestLabel.isNotBlank() && latestLabel != field.label) onLabelChange(latestLabel)
+    }
+    var hintText by remember(field.uid, field.hint) { mutableStateOf(field.hint ?: "") }
+    val latestHint by rememberUpdatedState(hintText)
+    val commitHint = {
+        if (latestHint.trim() != (field.hint ?: "")) onHintChange(latestHint)
+    }
+    DisposableEffect(field.uid) { onDispose { commitLabel(); commitHint() } }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val borderStroke = if (isConditional) {
         BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary)
     } else {
@@ -906,6 +993,8 @@ fun FieldDesignerRow(
 
                 if (isConditional) {
                     Spacer(modifier = Modifier.width(6.dp))
+                    // Takes only the space left by the toolbar icons; long question names are shortened.
+                    Box(modifier = Modifier.weight(1f)) {
                     Surface(
                         color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
@@ -923,16 +1012,19 @@ fun FieldDesignerRow(
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "IF ${field.conditionalLogicJson}",
+                                text = ruleText,
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
                     }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
                 }
-
-                Spacer(modifier = Modifier.weight(1f))
 
                 // Toolbar swap icons
                 IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
@@ -942,7 +1034,7 @@ fun FieldDesignerRow(
                     Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(16.dp))
                 }
                 IconButton(onClick = onDuplicate, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Add, contentDescription = "Duplicate", modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", modifier = Modifier.size(16.dp))
                 }
                 IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
@@ -952,12 +1044,34 @@ fun FieldDesignerRow(
             // Row 2: In-line editable text
             Spacer(modifier = Modifier.height(6.dp))
             OutlinedTextField(
-                value = field.label,
-                onValueChange = onLabelChange,
+                value = labelText,
+                onValueChange = { labelText = it },
                 placeholder = { Text("Type question label here...") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { if (!it.isFocused) commitLabel() },
                 singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focusManager.clearFocus() }),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = Color.Transparent
+                ),
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            OutlinedTextField(
+                value = hintText,
+                onValueChange = { hintText = it },
+                placeholder = { Text("Hint (optional)", fontSize = 12.sp) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { if (!it.isFocused) commitHint() },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focusManager.clearFocus() }),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = Color.Transparent
@@ -1101,4 +1215,23 @@ fun FieldDesignerRow(
             }
         }
     }
+}
+
+@Composable
+private fun ConfirmDeleteDialog(title: String, message: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = {
+            Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                Text("Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

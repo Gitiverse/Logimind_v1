@@ -18,9 +18,18 @@ val InnerNeutralLight = Color(0xFFF1F4F9)
 val ActionRed = Color(0xFFBA1A1A)
 val ActionRedContainer = Color(0xFFFFDAD6)
 
-// Dark Palette equivalents in case system requests dark
-val DarkBackgroundSlate = Color(0xFF111318)
+// Clinical teal accent (the cross in the logo)
+val MedicalTeal = Color(0xFF0F8A7C)
+val MedicalTealContainer = Color(0xFFD5F5EF)
+val OnMedicalTealContainer = Color(0xFF00201C)
+
+// Dark palette: deep navy-slate background with raised surfaces
+val DarkBackgroundSlate = Color(0xFF0F1318)
 val DarkTextLight = Color(0xFFE2E2E9)
-val DarkSurface = Color(0xFF1E2125)
-val DarkBorder = Color(0xFF43474E)
+val DarkTextMuted = Color(0xFFB8C3D4)
+val DarkSurface = Color(0xFF171B21)
+val DarkSurfaceVariant = Color(0xFF232830)
+val DarkBorder = Color(0xFF3A3F47)
+val DarkOutline = Color(0xFF8D939C)
 val DarkBlue = Color(0xFF9ECAFF)
+val DarkTeal = Color(0xFF5EDBC7)

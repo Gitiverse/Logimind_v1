@@ -4,6 +4,8 @@ import androidx.room.*
 import com.example.data.model.*
 import kotlinx.coroutines.flow.Flow
 
+// Writes to rows that have children use @Upsert: REPLACE deletes the old row first, which
+// fires ON DELETE CASCADE and silently removes its sections/fields/options/entries.
 @Dao
 interface MedicalFormDao {
 
@@ -14,7 +16,7 @@ interface MedicalFormDao {
     @Query("SELECT * FROM form_templates WHERE uid = :uid LIMIT 1")
     suspend fun getFormTemplateByUid(uid: String): FormTemplate?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insertFormTemplate(template: FormTemplate)
 
     @Update
@@ -30,7 +32,7 @@ interface MedicalFormDao {
     @Query("SELECT * FROM form_sections WHERE templateId = :templateId ORDER BY sortOrder ASC")
     suspend fun getSectionsForTemplate(templateId: String): List<FormSection>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insertFormSection(section: FormSection)
 
     @Query("DELETE FROM form_sections WHERE templateId = :templateId")
@@ -49,7 +51,7 @@ interface MedicalFormDao {
     @Query("SELECT * FROM form_fields WHERE sectionId = :sectionId ORDER BY sortOrder ASC")
     suspend fun getFieldsForSection(sectionId: String): List<FormField>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insertFormField(field: FormField)
 
     @Update
@@ -65,7 +67,7 @@ interface MedicalFormDao {
     @Query("SELECT * FROM form_field_options WHERE fieldId = :fieldId ORDER BY sortOrder ASC")
     suspend fun getOptionsForField(fieldId: String): List<FormFieldOption>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insertFormFieldOption(option: FormFieldOption)
 
     @Query("DELETE FROM form_field_options WHERE fieldId = :fieldId")
@@ -81,7 +83,7 @@ interface MedicalFormDao {
     @Query("SELECT * FROM patients WHERE uid = :uid LIMIT 1")
     suspend fun getPatientByUid(uid: String): Patient?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insertPatient(patient: Patient)
 
     @Query("DELETE FROM patients WHERE uid = :uid")
@@ -97,11 +99,34 @@ interface MedicalFormDao {
     @Query("SELECT * FROM form_entries WHERE patientId = :patientId ORDER BY createdAt DESC")
     fun getFormEntriesForPatientFlow(patientId: String): Flow<List<FormEntry>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insertFormEntry(entry: FormEntry)
 
     @Query("DELETE FROM form_entries WHERE uid = :uid")
     suspend fun deleteFormEntryByUid(uid: String)
+
+    @Query("SELECT * FROM form_sections")
+    fun getAllSectionsFlow(): Flow<List<FormSection>>
+
+    // Entries keep a copy of the patient's name; keep it in step when the patient is edited.
+    @Query("UPDATE form_entries SET patientName = :name WHERE patientId = :patientId")
+    suspend fun updatePatientNameInEntries(patientId: String, name: String)
+
+    // --- Full backup reads ---
+    @Query("SELECT * FROM form_sections")
+    suspend fun getAllSections(): List<FormSection>
+
+    @Query("SELECT * FROM form_fields")
+    suspend fun getAllFields(): List<FormField>
+
+    @Query("SELECT * FROM form_field_options")
+    suspend fun getAllOptions(): List<FormFieldOption>
+
+    @Query("SELECT * FROM entry_answers")
+    suspend fun getAllAnswers(): List<EntryAnswer>
+
+    @Query("SELECT COUNT(*) FROM form_entries WHERE templateId = :templateId")
+    suspend fun countEntriesForTemplate(templateId: String): Int
 
     // --- Entry Answers ---
     @Query("SELECT * FROM entry_answers WHERE entryId = :entryId")
