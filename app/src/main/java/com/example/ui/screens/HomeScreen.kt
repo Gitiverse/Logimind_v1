@@ -20,7 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -75,6 +75,10 @@ fun HomeScreen(
     var patientToDelete by remember { mutableStateOf<Patient?>(null) }
     var patientToEdit by remember { mutableStateOf<Patient?>(null) }
     var showLogSearch by remember { mutableStateOf(false) }
+    val tipContext = androidx.compose.ui.platform.LocalContext.current
+    var tileTipDismissed by remember {
+        mutableStateOf(tipContext.getSharedPreferences("logimind_prefs", android.content.Context.MODE_PRIVATE).getBoolean("tile_tip_dismissed", false))
+    }
     var logSearchQuery by remember { mutableStateOf("") }
     // Searchable text per entry: title, patient, MRN, template and every answer value.
     val entrySearchText = remember(entries, patients, fieldLabelMap) {
@@ -377,7 +381,7 @@ fun HomeScreen(
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.Default.Settings,
+                                    imageVector = Icons.Rounded.Settings,
                                     contentDescription = "Settings",
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(20.dp)
@@ -399,10 +403,10 @@ fun HomeScreen(
                             ) {
                                 val badgeColor = if (isPremium) BrandTheme.colors.onPremiumContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                 Icon(
-                                    imageVector = if (isPremium) Icons.Default.Star else Icons.Default.Lock,
+                                    imageVector = if (isPremium) Icons.Rounded.Star else Icons.Rounded.Lock,
                                     contentDescription = null,
                                     tint = badgeColor,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
@@ -427,7 +431,7 @@ fun HomeScreen(
                         modifier = modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.background)
-                            .padding(horizontal = 20.dp),
+                            .padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                         contentPadding = PaddingValues(top = 20.dp, bottom = 40.dp)
                     ) {
@@ -448,11 +452,11 @@ fun HomeScreen(
                             }
 
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                Card(
+                                if (!tileTipDismissed) Card(
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
                                     ),
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -460,18 +464,29 @@ fun HomeScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Info,
+                                            imageVector = Icons.Rounded.Info,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(18.dp)
                                         )
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "Drag & drop: Press & hold any tile to reorganize dashboard",
-                                            fontSize = 11.sp,
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.weight(1f)
                                         )
+                                        IconButton(
+                                            onClick = {
+                                                tileTipDismissed = true
+                                                context.getSharedPreferences("logimind_prefs", android.content.Context.MODE_PRIVATE)
+                                                    .edit().putBoolean("tile_tip_dismissed", true).apply()
+                                            },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.Close, contentDescription = "Hide tip", modifier = Modifier.size(18.dp))
+                                        }
                                     }
                                 }
 
@@ -506,11 +521,11 @@ fun HomeScreen(
                                     for (spec in rowSpecs) {
                                         val (id, title, description) = spec
                                             val tileIcon = when (id) {
-                                                "patients" -> Icons.Default.People
-                                                "new_entry" -> Icons.Default.Add
-                                                "templates" -> Icons.Default.Description
-                                                "sync" -> Icons.Default.Sync
-                                                else -> Icons.Default.CheckCircle
+                                                "patients" -> Icons.Rounded.People
+                                                "new_entry" -> Icons.Rounded.Add
+                                                "templates" -> Icons.Rounded.Description
+                                                "sync" -> Icons.Rounded.Sync
+                                                else -> Icons.Rounded.CheckCircle
                                             }
                                             val tileBadge = if (id == "my_procedures") "AGGREGATED" else null
                                             val tileColor = when (id) {
@@ -642,7 +657,7 @@ fun HomeScreen(
                                         // Custom interactive Select mode chip
                                         Surface(
                                             color = if (isSelectionMode) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                            shape = RoundedCornerShape(4.dp),
+                                            shape = RoundedCornerShape(6.dp),
                                             modifier = Modifier.clickable {
                                                 isSelectionMode = !isSelectionMode
                                                 if (!isSelectionMode) {
@@ -652,7 +667,7 @@ fun HomeScreen(
                                         ) {
                                             Text(
                                                 text = if (isSelectionMode) "✓ Select Active" else "Select Mode",
-                                                fontSize = 9.sp,
+                                                fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isSelectionMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -667,7 +682,7 @@ fun HomeScreen(
                                         modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
-                                            imageVector = if (showLogSearch) Icons.Default.SearchOff else Icons.Default.Search,
+                                            imageVector = if (showLogSearch) Icons.Rounded.SearchOff else Icons.Rounded.Search,
                                             contentDescription = if (showLogSearch) "Close search" else "Search logs",
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(20.dp)
@@ -688,11 +703,11 @@ fun HomeScreen(
                                         value = logSearchQuery,
                                         onValueChange = { logSearchQuery = it },
                                         placeholder = { Text("Search patient, MRN, procedure, answer...") },
-                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                                         trailingIcon = {
                                             if (logSearchQuery.isNotEmpty()) {
                                                 IconButton(onClick = { logSearchQuery = "" }) {
-                                                    Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                                                    Icon(Icons.Rounded.Clear, contentDescription = "Clear search")
                                                 }
                                             }
                                         },
@@ -779,7 +794,7 @@ fun HomeScreen(
                                                     shape = RoundedCornerShape(8.dp),
                                                     modifier = Modifier.height(28.dp)
                                                 ) {
-                                                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(12.dp))
+                                                    Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text("Export", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                 }
@@ -796,7 +811,7 @@ fun HomeScreen(
                             item {
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(24.dp),
+                                    shape = RoundedCornerShape(16.dp),
                                     elevation = CardDefaults.cardElevation(4.dp),
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.surface
@@ -878,7 +893,7 @@ fun HomeScreen(
                                             contentAlignment = Alignment.CenterEnd
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.Delete,
+                                                imageVector = Icons.Rounded.Delete,
                                                 contentDescription = "Swipe to delete",
                                                 tint = MaterialTheme.colorScheme.onErrorContainer,
                                                 modifier = Modifier.padding(end = 16.dp)
@@ -924,16 +939,26 @@ fun HomeScreen(
                                                 }
                                                 Surface(
                                                     shape = CircleShape,
-                                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                                                    modifier = Modifier.size(34.dp)
+                                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                                    modifier = Modifier.size(40.dp)
                                                 ) {
                                                     Box(contentAlignment = Alignment.Center) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.List,
-                                                            contentDescription = null,
-                                                            tint = MaterialTheme.colorScheme.primary,
-                                                            modifier = Modifier.size(16.dp)
-                                                        )
+                                                        val initial = entry.patientName?.trim()?.firstOrNull()?.uppercaseChar()
+                                                        if (entry.patientId != null && initial != null) {
+                                                            Text(
+                                                                text = initial.toString(),
+                                                                fontSize = 16.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        } else {
+                                                            Icon(
+                                                                imageVector = Icons.Rounded.Assignment,
+                                                                contentDescription = null,
+                                                                tint = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.size(20.dp)
+                                                            )
+                                                        }
                                                     }
                                                 }
                                                 Spacer(modifier = Modifier.width(10.dp))
@@ -947,11 +972,17 @@ fun HomeScreen(
                                                         color = MaterialTheme.colorScheme.onSurface
                                                     )
                                                     Text(
-                                                        text = "${entry.patientName} • Blueprint: ${entry.templateName}",
-                                                        fontSize = 11.sp,
+                                                        text = "${entry.patientName} • ${entry.templateName}",
+                                                        fontSize = 12.sp,
                                                         color = MaterialTheme.colorScheme.secondary,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = java.text.SimpleDateFormat("EEE, MMM d yyyy • HH:mm", java.util.Locale.getDefault())
+                                                            .format(java.util.Date(entry.createdAt)),
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.secondary
                                                     )
                                                 }
                                                 Row(
@@ -959,10 +990,10 @@ fun HomeScreen(
                                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
                                                     Icon(
-                                                        imageVector = Icons.Default.ArrowForward,
+                                                        imageVector = Icons.Rounded.ArrowForward,
                                                         contentDescription = "Details",
                                                         tint = MaterialTheme.colorScheme.outline,
-                                                        modifier = Modifier.size(16.dp)
+                                                        modifier = Modifier.size(18.dp)
                                                     )
                                                 }
                                             }
@@ -987,10 +1018,10 @@ fun HomeScreen(
                                                 MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                                             }
                                         ),
-                                        shape = RoundedCornerShape(14.dp)
+                                        shape = RoundedCornerShape(12.dp)
                                     ),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(12.dp),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                             ) {
                                 Column(modifier = Modifier.padding(16.dp)) {
@@ -1004,10 +1035,10 @@ fun HomeScreen(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.Star,
+                                                imageVector = Icons.Rounded.Star,
                                                 contentDescription = null,
                                                 tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(16.dp)
+                                                modifier = Modifier.size(18.dp)
                                             )
                                             Text(
                                                 text = "AI Summary",
@@ -1021,11 +1052,11 @@ fun HomeScreen(
                                         val aiSummaryCount by viewModel.aiSummaryCount.collectAsState()
                                         Surface(
                                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                            shape = RoundedCornerShape(4.dp)
+                                            shape = RoundedCornerShape(6.dp)
                                         ) {
                                             Text(
                                                 text = "⚡ DIGITAL BRIEFINGS: $aiSummaryCount",
-                                                fontSize = 8.sp,
+                                                fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1047,7 +1078,7 @@ fun HomeScreen(
                                             modifier = Modifier.fillMaxWidth(),
                                             shape = RoundedCornerShape(10.dp)
                                         ) {
-                                            Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.Rounded.List, contentDescription = null, modifier = Modifier.size(18.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text("Select Logs to Summarize", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
@@ -1093,7 +1124,7 @@ fun HomeScreen(
                                                             )
                                                             Text(
                                                                 text = "Combine active selection into a unified briefing.",
-                                                                fontSize = 10.sp,
+                                                                fontSize = 11.sp,
                                                                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
                                                             )
                                                         }
@@ -1134,7 +1165,7 @@ fun HomeScreen(
                                                         Spacer(modifier = Modifier.height(4.dp))
                                                         Text(
                                                             text = "Patient: ${log.patientName ?: "Theatre"} | Blueprint: ${log.templateName}",
-                                                            fontSize = 10.sp,
+                                                            fontSize = 11.sp,
                                                             color = MaterialTheme.colorScheme.secondary
                                                         )
                                                     }
@@ -1149,7 +1180,7 @@ fun HomeScreen(
                                                         Spacer(modifier = Modifier.height(4.dp))
                                                         Text(
                                                             text = "Synthesizing ${selectedEntriesForAiSummary.size} assessment records across patient logs.",
-                                                            fontSize = 10.sp,
+                                                            fontSize = 11.sp,
                                                             color = MaterialTheme.colorScheme.secondary
                                                         )
                                                     }
@@ -1160,9 +1191,9 @@ fun HomeScreen(
                                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 Text(
                                                     text = "Configure Presentation Style:",
-                                                    fontSize = 10.sp,
+                                                    fontSize = 11.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.outline
+                                                    color = MaterialTheme.colorScheme.secondary
                                                 )
                                                 Row(
                                                     modifier = Modifier.fillMaxWidth(),
@@ -1185,7 +1216,7 @@ fun HomeScreen(
                                                         ) {
                                                             Text(
                                                                 text = label,
-                                                                fontSize = 9.sp,
+                                                                fontSize = 11.sp,
                                                                 fontWeight = FontWeight.Bold,
                                                                 color = if (isStyleSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                                                                 textAlign = TextAlign.Center,
@@ -1199,9 +1230,9 @@ fun HomeScreen(
 
                                                 Text(
                                                     text = "Select AI Summary LLM Engine:",
-                                                    fontSize = 10.sp,
+                                                    fontSize = 11.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.outline
+                                                    color = MaterialTheme.colorScheme.secondary
                                                 )
                                                 
                                                 Row(
@@ -1235,7 +1266,7 @@ fun HomeScreen(
                                                             ) {
                                                                 Text(
                                                                     text = label.split(" ").first(),
-                                                                    fontSize = 9.sp,
+                                                                    fontSize = 11.sp,
                                                                     fontWeight = FontWeight.Bold,
                                                                     color = if (isProvSel) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurfaceVariant,
                                                                     textAlign = TextAlign.Center
@@ -1243,10 +1274,10 @@ fun HomeScreen(
                                                                 if (isPremium) {
                                                                     Spacer(modifier = Modifier.width(2.dp))
                                                                     Icon(
-                                                                        imageVector = Icons.Default.Star,
+                                                                        imageVector = Icons.Rounded.Star,
                                                                         contentDescription = "Premium Mode",
                                                                         tint = if (isProvSel) MaterialTheme.colorScheme.onSecondary else Color(0xFFFFB300),
-                                                                        modifier = Modifier.size(8.dp)
+                                                                        modifier = Modifier.size(14.dp)
                                                                     )
                                                                 }
                                                             }
@@ -1263,7 +1294,7 @@ fun HomeScreen(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 shape = RoundedCornerShape(10.dp)
                                             ) {
-                                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Text(if (aiGeneratedSummaryText.isBlank()) "Generate Summary" else "Regenerate Summary", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                             }
@@ -1323,7 +1354,7 @@ fun HomeScreen(
                                                     modifier = Modifier.height(36.dp),
                                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
                                                 ) {
-                                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                                                     Spacer(modifier = Modifier.width(6.dp))
                                                     Text("Copy Clinical Text", fontSize = 11.sp)
                                                 }
@@ -1360,7 +1391,7 @@ fun HomeScreen(
                                         onClick = { selectedTabId = 0 },
                                         modifier = Modifier.size(36.dp)
                                     ) {
-                                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
                                     }
                                     Text(
                                         text = "Home",
@@ -1373,7 +1404,7 @@ fun HomeScreen(
                                     // Custom questions setup gear
                                     IconButton(onClick = { showCustomizeFieldsDialog = true }) {
                                         Icon(
-                                            imageVector = Icons.Default.Settings,
+                                            imageVector = Icons.Rounded.Settings,
                                             contentDescription = "Customize Questions",
                                             tint = MaterialTheme.colorScheme.primary
                                         )
@@ -1388,7 +1419,7 @@ fun HomeScreen(
                                         value = patientFilterQuery,
                                         onValueChange = { patientFilterQuery = it },
                                         placeholder = { Text("name or ID...") },
-                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                                         modifier = Modifier.weight(1f),
                                         shape = RoundedCornerShape(10.dp),
                                         colors = OutlinedTextFieldDefaults.colors(
@@ -1400,7 +1431,7 @@ fun HomeScreen(
                                         onClick = { showCreatePatientDialog = true },
                                         shape = RoundedCornerShape(10.dp)
                                     ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text("Register", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
@@ -1417,7 +1448,7 @@ fun HomeScreen(
                             item {
                                 EmptyStateCard(
                                     text = "No match found.",
-                                    icon = Icons.Default.Person
+                                    icon = Icons.Rounded.Person
                                 )
                             }
                         } else {
@@ -1444,7 +1475,7 @@ fun HomeScreen(
                                                 modifier = Modifier.size(36.dp)
                                             ) {
                                                 Box(contentAlignment = Alignment.Center) {
-                                                    Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                                    Icon(Icons.Rounded.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                                                 }
                                             }
                                             Spacer(modifier = Modifier.width(10.dp))
@@ -1463,8 +1494,8 @@ fun HomeScreen(
                                             }
                                             IconButton(onClick = { detailsExpanded = !detailsExpanded }) {
                                                 Icon(
-                                                    imageVector = if (detailsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                                    contentDescription = null
+                                                    imageVector = if (detailsExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                                                    contentDescription = if (detailsExpanded) "Hide patient details" else "Show patient details"
                                                 )
                                             }
                                         }
@@ -1505,7 +1536,7 @@ fun HomeScreen(
 
                                             if (patHistories.isNotEmpty()) {
                                                 Spacer(modifier = Modifier.height(12.dp))
-                                                Text("FILING STATS HISTORY LOGS:", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+                                                Text("FILING STATS HISTORY LOGS:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
                                                 patHistories.forEach { rec ->
                                                     Row(
                                                         modifier = Modifier
@@ -1518,7 +1549,7 @@ fun HomeScreen(
                                                         horizontalArrangement = Arrangement.SpaceBetween
                                                     ) {
                                                         Text(text = "• ${rec.title}", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                                        Text(text = "View details >", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                                        Text(text = "View details >", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                                     }
                                                 }
                                             }
@@ -1529,7 +1560,7 @@ fun HomeScreen(
                                                 horizontalArrangement = Arrangement.End
                                             ) {
                                                 TextButton(onClick = { patientToEdit = pat }) {
-                                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                    Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text("Edit Profile", fontSize = 11.sp)
                                                 }
@@ -1537,7 +1568,7 @@ fun HomeScreen(
                                                     onClick = { patientToDelete = pat },
                                                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                                                 ) {
-                                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                    Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text("Delete Profile", fontSize = 11.sp)
                                                 }
@@ -1568,7 +1599,7 @@ fun HomeScreen(
                                     onClick = { selectedTabId = 0 },
                                     modifier = Modifier.size(36.dp)
                                 ) {
-                                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                    Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
                                 }
                                 Text(
                                     text = "HOME",
@@ -1582,7 +1613,7 @@ fun HomeScreen(
                                     onClick = { showCreateTemplateDialog = true },
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("NEW", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
@@ -1593,7 +1624,7 @@ fun HomeScreen(
                             item {
                                 EmptyStateCard(
                                     text = "No templates yet",
-                                    icon = Icons.Default.List
+                                    icon = Icons.Rounded.List
                                 )
                             }
                         } else {
@@ -1616,7 +1647,7 @@ fun HomeScreen(
                                             modifier = Modifier.size(40.dp)
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
-                                                Icon(Icons.Default.List, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                                Icon(Icons.Rounded.List, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                                             }
                                         }
                                         Spacer(modifier = Modifier.width(12.dp))
@@ -1638,10 +1669,10 @@ fun HomeScreen(
                                             )
                                         }
                                         Icon(
-                                            imageVector = Icons.Default.MoreVert,
+                                            imageVector = Icons.Rounded.MoreVert,
                                             contentDescription = "Options",
                                             tint = MaterialTheme.colorScheme.outline,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                 }
@@ -1711,7 +1742,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Use Template", fontWeight = FontWeight.Bold)
                     }
@@ -1726,7 +1757,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Edit blueprint Questions")
                     }
@@ -1740,7 +1771,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Preview template read-only")
                     }
@@ -1754,7 +1785,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Duplicate Template COPY")
                     }
@@ -1768,7 +1799,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Rename Blueprint Template")
                     }
@@ -1783,7 +1814,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(if (isPinned) Icons.Default.StarBorder else Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(if (isPinned) Icons.Rounded.StarBorder else Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(if (isPinned) "Unpin from New Entry" else "Pin to top of New Entry")
                     }
@@ -1797,7 +1828,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(if (selTemp.isActive) Icons.Default.Archive else Icons.Default.Unarchive, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(if (selTemp.isActive) Icons.Rounded.Archive else Icons.Rounded.Unarchive, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(if (selTemp.isActive) "Archive (keep entries, hide from New Entry)" else "Unarchive")
                     }
@@ -1814,7 +1845,7 @@ fun HomeScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Delete Blueprint", fontWeight = FontWeight.Bold)
                     }
@@ -1902,7 +1933,7 @@ fun HomeScreen(
                                         if (opts.isNotEmpty()) {
                                             Text(
                                                 opts.joinToString(" / ") { it.label },
-                                                fontSize = 10.sp,
+                                                fontSize = 11.sp,
                                                 color = MaterialTheme.colorScheme.secondary,
                                                 modifier = Modifier.padding(start = 10.dp)
                                             )
@@ -1950,7 +1981,7 @@ fun HomeScreen(
                                 value = patientSearchQuery,
                                 onValueChange = { patientSearchQuery = it },
                                 placeholder = { Text("Search by name or ID...") },
-                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(8.dp)
                             )
@@ -1960,7 +1991,7 @@ fun HomeScreen(
                                 onClick = { showCreatePatientDialog = true },
                                 contentPadding = PaddingValues(horizontal = 4.dp)
                             ) {
-                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("New patient", fontSize = 12.sp)
                             }
@@ -1978,7 +2009,7 @@ fun HomeScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Rounded.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Theatre", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
@@ -2009,11 +2040,11 @@ fun HomeScreen(
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                                            Icon(Icons.Rounded.Person, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Column {
                                                 Text(p.name, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                                Text("MRN ID: ${p.medicalId}", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                                                Text("MRN ID: ${p.medicalId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
                                             }
                                         }
                                     }
@@ -2052,7 +2083,7 @@ fun HomeScreen(
                                         ) {
                                             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(
-                                                    if (temp.uid in pinnedTemplates) Icons.Default.Star else Icons.Default.List,
+                                                    if (temp.uid in pinnedTemplates) Icons.Rounded.Star else Icons.Rounded.List,
                                                     contentDescription = if (temp.uid in pinnedTemplates) "Pinned" else null,
                                                     tint = MaterialTheme.colorScheme.primary
                                                 )
@@ -2098,7 +2129,7 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Rounded.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Text("Sync & Clinical Export Hub", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             },
@@ -2120,7 +2151,7 @@ fun HomeScreen(
                             ) {
                                 Text(
                                     text = tabTitle,
-                                    fontSize = 9.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     textAlign = TextAlign.Center,
                                     color = if (isTabSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2146,7 +2177,7 @@ fun HomeScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("Offline Sync Status:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                                    Text("Offline Sync Status:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
                                     Text(
                                         text = when (syncState) {
                                             is SyncState.Idle -> "Not connected (coming soon)"
@@ -2167,7 +2198,7 @@ fun HomeScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Rounded.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text("Cloud Synchronizer is limited to Premium tiers.", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
                                     }
@@ -2214,7 +2245,7 @@ fun HomeScreen(
                                     )
                                     Text(
                                         text = if (selectedEntriesForExport.isNotEmpty()) "Using Active Selection Filters" else "Using Complete EMR Database",
-                                        fontSize = 10.sp,
+                                        fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.secondary
                                     )
                                 }
@@ -2244,7 +2275,7 @@ fun HomeScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(10.dp)
                                     ) {
-                                        Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Rounded.Print, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("Share Monochrome EMR PDF", fontSize = 12.sp)
                                     }
@@ -2263,7 +2294,7 @@ fun HomeScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
                                         shape = RoundedCornerShape(10.dp)
                                     ) {
-                                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("Share Spreadsheets (CSV)", fontSize = 12.sp)
                                     }
@@ -2282,7 +2313,7 @@ fun HomeScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
                                         shape = RoundedCornerShape(10.dp)
                                     ) {
-                                        Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("Share Packaged ZIP Bundle", fontSize = 12.sp)
                                     }
@@ -2307,7 +2338,7 @@ fun HomeScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Icon(Icons.Default.Backup, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Rounded.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Save Lossless JSON Backup", fontSize = 12.sp)
                                 }
@@ -2322,9 +2353,9 @@ fun HomeScreen(
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                                     ) {
-                                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Icon(Icons.Rounded.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Browse File", fontSize = 10.sp)
+                                        Text("Browse File", fontSize = 11.sp)
                                     }
 
                                     Button(
@@ -2333,9 +2364,9 @@ fun HomeScreen(
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                                     ) {
-                                        Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Icon(Icons.Rounded.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Paste Script", fontSize = 10.sp)
+                                        Text("Paste Script", fontSize = 11.sp)
                                     }
                                 }
                             }
@@ -2401,7 +2432,7 @@ fun HomeScreen(
             onDismissRequest = { restoreMessage = null },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Text("Backup & Export")
                 }
             },
@@ -2426,7 +2457,7 @@ fun HomeScreen(
             onDismissRequest = { showGeminiApiSettingsDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Rounded.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Text("Settings")
                 }
             },
@@ -2497,7 +2528,7 @@ fun HomeScreen(
                         trailingIcon = {
                             IconButton(onClick = { isKeyVisible = !isKeyVisible }) {
                                 Icon(
-                                    imageVector = if (isKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    imageVector = if (isKeyVisible) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
                                     contentDescription = "Toggle Key Visibility"
                                 )
                             }
@@ -2589,12 +2620,12 @@ fun HomeScreen(
                     ) {
                         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Rounded.Security, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                                 Text("Security Info:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             }
                             Text(
                                 text = "Your key is stored encrypted on this phone only and is sent only to Google's Gemini API when you run a Gemini summary. Selected log contents (including patient names) are sent to Google for that summary.",
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -2630,7 +2661,7 @@ fun HomeScreen(
             onDismissRequest = { showCustomizeFieldsDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Rounded.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Text("Customize Intake Questions")
                 }
             },
@@ -2657,7 +2688,7 @@ fun HomeScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(item.label, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text(text = if (item.isRequired) "Registration Required" else "Optional intake question", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                                    Text(text = if (item.isRequired) "Registration Required" else "Optional intake question", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
                                 }
                                 
                                 Switch(
@@ -2680,13 +2711,13 @@ fun HomeScreen(
                                 if (item.id.startsWith("custom_intake_") || !listOf("age", "phone", "insurance", "notes").contains(item.id)) {
                                     IconButton(
                                         onClick = { localList.removeAt(index) },
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(40.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Delete,
+                                            imageVector = Icons.Rounded.Delete,
                                             contentDescription = "Delete custom field",
                                             tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 }
@@ -2729,7 +2760,7 @@ fun HomeScreen(
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.AddCircle, contentDescription = "Add Question", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Rounded.AddCircle, contentDescription = "Add Question", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -2757,7 +2788,7 @@ fun HomeScreen(
             onDismissRequest = { logToDelete = null },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Rounded.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                     Text("Delete Assessment Log?")
                 }
             },
@@ -2907,7 +2938,7 @@ fun HomeScreen(
             onDismissRequest = { showSelectLogsForAiDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.List, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Rounded.List, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Text("Select Logs to Summarize")
                 }
             },
@@ -3005,7 +3036,7 @@ fun HomeScreen(
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(entry.title, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("${entry.patientName} • Blueprint: ${entry.templateName}", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("${entry.patientName} • Blueprint: ${entry.templateName}", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                             }
@@ -3427,7 +3458,7 @@ fun HomeScreen(
                         )
                     }
                     IconButton(onClick = { selectedEntryForView = null }) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+                        Icon(Icons.Rounded.Close, contentDescription = "Close")
                     }
                 }
 
@@ -3439,14 +3470,14 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Rounded.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(text = entry.patientName ?: "General Theatre", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             val linkedPatient = patients.find { it.uid == entry.patientId }
                             Text(
                                 text = if (linkedPatient != null) "MRN: ${linkedPatient.medicalId}" else "No patient profile linked",
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.secondary
                             )
                         }
@@ -3455,9 +3486,9 @@ fun HomeScreen(
 
                 Text(
                     text = "RECORDED ASSESSMENT ANSWERS & ATTRIBUTION:",
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.outline
+                    color = MaterialTheme.colorScheme.secondary
                 )
 
                 if (answersMap.isEmpty()) {
@@ -3476,7 +3507,7 @@ fun HomeScreen(
                                 text = "General Case Details",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.outline,
+                                color = MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                             )
                             for ((fieldId, formattedLabel, answer) in normalAnswers) {
@@ -3510,7 +3541,7 @@ fun HomeScreen(
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Surface(
                                                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
-                                                shape = RoundedCornerShape(4.dp),
+                                                shape = RoundedCornerShape(6.dp),
                                                 modifier = Modifier.fillMaxWidth()
                                             ) {
                                                 Row(
@@ -3518,10 +3549,10 @@ fun HomeScreen(
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     Icon(
-                                                        imageVector = Icons.Default.AccountBox,
+                                                        imageVector = Icons.Rounded.AccountBox,
                                                         contentDescription = null,
                                                         tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(12.dp)
+                                                        modifier = Modifier.size(16.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text(
@@ -3529,7 +3560,7 @@ fun HomeScreen(
                                                             attrItem.providerName.takeIf { it.isNotBlank() }?.let { "By: $it${if (attrItem.providerType.isNotBlank()) " (${attrItem.providerType})" else ""}" },
                                                             attrItem.supervisorWitness.takeIf { it.isNotBlank() }?.let { "Witness: $it${if (attrItem.isWitnessVerified) " ✓" else ""}" }
                                                         ).joinToString(" | ").ifBlank { "No attribution" },
-                                                        fontSize = 9.sp,
+                                                        fontSize = 11.sp,
                                                         color = MaterialTheme.colorScheme.primary,
                                                         fontWeight = FontWeight.Bold
                                                     )
@@ -3561,10 +3592,10 @@ fun HomeScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Check,
+                                            imageVector = Icons.Rounded.Check,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(14.dp)
+                                            modifier = Modifier.size(18.dp)
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(text = "• $proc", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -3612,10 +3643,10 @@ fun HomeScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Info,
+                                            imageVector = Icons.Rounded.Info,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.secondary,
-                                            modifier = Modifier.size(14.dp)
+                                            modifier = Modifier.size(18.dp)
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(text = "• $proc", fontSize = 13.sp)
@@ -3641,7 +3672,7 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Edit Log Entry", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
@@ -3657,7 +3688,7 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Repeat as New Entry", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
@@ -3672,7 +3703,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("AI Summary", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
@@ -3694,7 +3725,7 @@ fun HomeScreen(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Rounded.Print, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Share PDF", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
@@ -3712,7 +3743,7 @@ fun HomeScreen(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Share CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
@@ -3727,7 +3758,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Delete Log", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
@@ -3879,7 +3910,7 @@ fun HomeScreen(
                                     }
                                 }
                             ) {
-                                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
                             }
                             Text(
                                 text = if (selectedDashboardProcedureName != null) selectedDashboardProcedureName!! else "My Procedures Dashboard",
@@ -3892,7 +3923,7 @@ fun HomeScreen(
                                 showProceduresDashboard = false 
                                 selectedDashboardProcedureName = null
                             }) {
-                                Icon(Icons.Default.Close, contentDescription = "Close Dashboard")
+                                Icon(Icons.Rounded.Close, contentDescription = "Close Dashboard")
                             }
                         }
 
@@ -3915,7 +3946,7 @@ fun HomeScreen(
                                         value = searchProcedureQuery,
                                         onValueChange = { searchProcedureQuery = it },
                                         placeholder = { Text("Search by surgery/test, e.g. Appendectomy") },
-                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                         modifier = Modifier.fillMaxWidth(),
                                         singleLine = true,
                                         shape = RoundedCornerShape(8.dp)
@@ -3926,7 +3957,7 @@ fun HomeScreen(
                                         value = searchPatientQuery,
                                         onValueChange = { searchPatientQuery = it },
                                         placeholder = { Text("Search by Patient Name") },
-                                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                        leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                         modifier = Modifier.fillMaxWidth(),
                                         singleLine = true,
                                         shape = RoundedCornerShape(8.dp)
@@ -3941,7 +3972,7 @@ fun HomeScreen(
                                             FilterChip(
                                                 selected = selectedDateRangeDayLimit == days,
                                                 onClick = { selectedDateRangeDayLimit = days },
-                                                label = { Text(label, fontSize = 10.sp) }
+                                                label = { Text(label, fontSize = 11.sp) }
                                             )
                                         }
                                     }
@@ -3997,7 +4028,7 @@ fun HomeScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.Print, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Export Procedure Report (PDF)", fontSize = 12.sp)
                             }
@@ -4040,7 +4071,7 @@ fun HomeScreen(
                                                     Text(name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                                     Text("${cases.size} recorded case(s)", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
                                                 }
-                                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Drill Down")
+                                                Icon(Icons.Rounded.KeyboardArrowRight, contentDescription = "Drill Down")
                                             }
                                         }
                                     }
@@ -4062,7 +4093,7 @@ fun HomeScreen(
                                     text = "Aggregated Cases for: $procName (${procedureCases.size} total case logs)",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.outline
+                                    color = MaterialTheme.colorScheme.secondary
                                 )
 
                                 if (displayedCases.isEmpty()) {
@@ -4086,16 +4117,16 @@ fun HomeScreen(
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     Text(case.patientName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                                    Text(dateStr, fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                                                    Text(dateStr, fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
                                                 }
                                                 Spacer(modifier = Modifier.height(2.dp))
-                                                Text("Filed under: Blueprint ${case.templateName}", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+                                                Text("Filed under: Blueprint ${case.templateName}", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                                                 Spacer(modifier = Modifier.height(4.dp))
                                                 Text(
                                                     text = "Tap to open original clinical entry log Check • MRN",
-                                                    fontSize = 9.sp,
+                                                    fontSize = 11.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.outline
+                                                    color = MaterialTheme.colorScheme.secondary
                                                 )
                                             }
                                         }
@@ -4159,7 +4190,7 @@ fun LargeChoiceTile(
             // TOP ICON
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(52.dp)
                     .clip(CircleShape)
                     .background(tintColor.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
@@ -4168,7 +4199,7 @@ fun LargeChoiceTile(
                     imageVector = icon,
                     contentDescription = title,
                     tint = tintColor,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(28.dp)
                 )
             }
 
@@ -4203,7 +4234,7 @@ fun LargeChoiceTile(
                                 horizontal = 8.dp,
                                 vertical = 2.dp
                             ),
-                            fontSize = 9.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = tintColor
                         )
@@ -4302,10 +4333,10 @@ fun CalendarDatePickerButton(
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.DateRange,
+                            imageVector = Icons.Rounded.DateRange,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
@@ -4320,13 +4351,13 @@ fun CalendarDatePickerButton(
                             onClick = {
                                 onClear()
                             },
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Clear,
+                                imageVector = Icons.Rounded.Clear,
                                 contentDescription = "Clear date",
                                 tint = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -4352,7 +4383,7 @@ fun CalendarDatePickerButton(
                 },
                 dismissButton = {
                     TextButton(onClick = { showDialog = false }) {
-                        Text("Cancel", color = MaterialTheme.colorScheme.outline)
+                        Text("Cancel", color = MaterialTheme.colorScheme.secondary)
                     }
                 }
             ) {

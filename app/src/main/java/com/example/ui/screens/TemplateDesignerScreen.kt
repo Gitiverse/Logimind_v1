@@ -13,7 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -108,10 +108,10 @@ fun TemplateDesignerScreen(
                                 color = MaterialTheme.colorScheme.secondary
                             )
                             Icon(
-                                imageVector = Icons.Default.Edit,
+                                imageVector = Icons.Rounded.Edit,
                                 contentDescription = "Rename",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(12.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -119,7 +119,7 @@ fun TemplateDesignerScreen(
                 navigationIcon = {
                     IconButton(onClick = handleBackClick) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
+                            imageVector = Icons.Rounded.ArrowBack,
                             contentDescription = "Back"
                         )
                     }
@@ -134,7 +134,7 @@ fun TemplateDesignerScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Add Group", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
@@ -161,7 +161,7 @@ fun TemplateDesignerScreen(
                     ) {
                         EmptyStateCard(
                             text = "This layout blueprint has no functional groups yet.\nTap 'Add Group' above to append assessment chapters.",
-                            icon = Icons.Default.Info
+                            icon = Icons.Rounded.Info
                         )
                     }
                 }
@@ -456,7 +456,7 @@ fun TemplateDesignerScreen(
                         }
 
                         if (hasConditionalDependency) {
-                            Text("Display ONLY IF this option value:", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                            Text("Display ONLY IF this option value:", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
                             
                             // Select dependency field
                             var dropdownExpanded by remember { mutableStateOf(false) }
@@ -492,7 +492,7 @@ fun TemplateDesignerScreen(
                             )
                             val parentChoices = options[dependOnFieldId].orEmpty().map { it.label }
                             if (parentChoices.isNotEmpty()) {
-                                Text("Choices: ${parentChoices.joinToString(" / ")}", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                                Text("Choices: ${parentChoices.joinToString(" / ")}", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
                             }
                             ruleError?.let { Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
                         }
@@ -736,11 +736,11 @@ fun SectionCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.8f)), shape = RoundedCornerShape(16.dp)),
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.8f)), shape = RoundedCornerShape(12.dp)),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
@@ -759,10 +759,10 @@ fun SectionCard(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Default.List,
+                            imageVector = Icons.Rounded.List,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -791,18 +791,18 @@ fun SectionCard(
                                             isEditingTitle = false
                                         }
                                     },
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(36.dp)
                                 ) {
-                                    Icon(Icons.Default.Check, contentDescription = "Save Title", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Rounded.Check, contentDescription = "Save Title", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                                 }
                                 IconButton(
                                     onClick = {
                                         editedTitleText = section.title
                                         isEditingTitle = false
                                     },
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(36.dp)
                                 ) {
-                                    Icon(Icons.Default.Close, contentDescription = "Cancel Title", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                                    Icon(Icons.Rounded.Close, contentDescription = "Cancel Title", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
                                 }
                             }
                         }
@@ -819,13 +819,16 @@ fun SectionCard(
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
                             color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(
-                            imageVector = Icons.Default.Edit,
+                            imageVector = Icons.Rounded.Edit,
                             contentDescription = "Edit Title",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -833,24 +836,24 @@ fun SectionCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     IconButton(
                         onClick = onMoveSectionUp,
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(36.dp),
                         colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(20.dp))
                     }
                     IconButton(
                         onClick = onMoveSectionDown,
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(36.dp),
                         colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(20.dp))
                     }
                     IconButton(
                         onClick = onDeleteSection,
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(36.dp),
                         colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete Group", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Delete, contentDescription = "Delete Group", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -905,7 +908,7 @@ fun SectionCard(
                 ),
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Add Question", fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
@@ -984,60 +987,58 @@ fun FieldDesignerRow(
                 ) {
                     Text(
                         text = field.type.uppercase(),
-                        fontSize = 9.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isConditional) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                     )
                 }
 
-                if (isConditional) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    // Takes only the space left by the toolbar icons; long question names are shortened.
-                    Box(modifier = Modifier.weight(1f)) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(10.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = ruleText,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    }
-                } else {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
+                Spacer(modifier = Modifier.weight(1f))
 
                 // Toolbar swap icons
-                IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(16.dp))
+                IconButton(onClick = onMoveUp, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(18.dp))
                 }
-                IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(16.dp))
+                IconButton(onClick = onMoveDown, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(18.dp))
                 }
-                IconButton(onClick = onDuplicate, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", modifier = Modifier.size(16.dp))
+                IconButton(onClick = onDuplicate, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Duplicate", modifier = Modifier.size(18.dp))
                 }
-                IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Rounded.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                }
+            }
+
+            // Show/hide rule on its own line so the full rule stays readable
+            if (isConditional) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = ruleText.replaceFirst("IF ", "Shown if "),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
@@ -1079,74 +1080,23 @@ fun FieldDesignerRow(
                 shape = RoundedCornerShape(8.dp)
             )
 
-            // Row 3: Required Checkbox
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            // Question settings as compact toggle chips (same settings as before, shorter labels)
+            Spacer(modifier = Modifier.height(6.dp))
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Checkbox(
-                    checked = field.isRequired,
-                    onCheckedChange = { onRequiredChange(it) },
-                    modifier = Modifier.size(32.dp)
-                )
-                Text("Doctor response mandatory", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Checkbox(
-                    checked = field.startMinimized,
-                    onCheckedChange = { onStartMinimizedChange(it) },
-                    modifier = Modifier.size(32.dp)
-                )
-                Text("Minimise this question in the new entry form by default", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
-            }
-
-            if (field.type == "checkbox_group" || field.type == "radio_group") {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Checkbox(
-                        checked = field.defaultValue == "horizontal",
-                        onCheckedChange = { onLayoutChange(it) },
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Text("Display choices horizontally instead of vertically", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                SettingChip("Required", field.isRequired) { onRequiredChange(it) }
+                SettingChip("Start collapsed", field.startMinimized) { onStartMinimizedChange(it) }
+                if (field.type == "checkbox_group" || field.type == "radio_group") {
+                    SettingChip("Horizontal choices", field.defaultValue == "horizontal") { onLayoutChange(it) }
                 }
-            }
-
-            if (field.type == "checkbox" || field.type == "checkbox_group") {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Checkbox(
-                        checked = field.isProcedure,
-                        onCheckedChange = { onProcedureChange(it) },
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Text("This is a procedure / test / surgery", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
-                }
-
-                if (field.isProcedure) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Checkbox(
-                            checked = field.askIfPerformedByMe,
-                            onCheckedChange = { onAskIfPerformedChange(it) },
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Text("Ask 'Did I perform this surgery?'", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                if (field.type == "checkbox" || field.type == "checkbox_group") {
+                    SettingChip("Procedure", field.isProcedure) { onProcedureChange(it) }
+                    if (field.isProcedure) {
+                        SettingChip("Ask \"Did I perform this?\"", field.askIfPerformedByMe) { onAskIfPerformedChange(it) }
                     }
                 }
             }
@@ -1177,28 +1127,27 @@ fun FieldDesignerRow(
                             ) {
                                 if (isAdv) {
                                     Icon(
-                                        imageVector = Icons.Default.Settings,
+                                        imageVector = Icons.Rounded.Settings,
                                         contentDescription = "Advanced",
                                         tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(11.dp)
+                                        modifier = Modifier.size(14.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                 }
                                 Text(
                                     text = opt.label,
-                                    fontSize = 11.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = if (isAdv) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isAdv) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Delete Option",
-                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .clickable { onDeleteOption(opt) }
-                                )
+                                IconButton(onClick = { onDeleteOption(opt) }, modifier = Modifier.size(32.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Delete choice ${opt.label}",
+                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1207,9 +1156,9 @@ fun FieldDesignerRow(
                         colors = IconButtonDefaults.iconButtonColors(
                             containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
                         ),
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(40.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Option", modifier = Modifier.size(14.dp))
+                        Icon(Icons.Rounded.Add, contentDescription = "Add Option", modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -1233,5 +1182,17 @@ private fun ConfirmDeleteDialog(title: String, message: String, onConfirm: () ->
                 Text("Cancel")
             }
         }
+    )
+}
+
+@Composable
+private fun SettingChip(label: String, selected: Boolean, onChange: (Boolean) -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = { onChange(!selected) },
+        label = { Text(label, fontSize = 12.sp) },
+        leadingIcon = if (selected) {
+            { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+        } else null
     )
 }

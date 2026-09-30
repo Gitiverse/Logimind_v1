@@ -17,7 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.*
@@ -151,12 +151,12 @@ fun FormSolveScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = handleBackClick) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
                     IconButton(onClick = { showClearConfirm = true }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Clear Answers", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Clear Answers", tint = MaterialTheme.colorScheme.primary)
                     }
                 },
                 modifier = Modifier.border(width = 1.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
@@ -167,14 +167,14 @@ fun FormSolveScreen(
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Card(
                     modifier = Modifier.padding(32.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                 ) {
                     Column(
                         modifier = Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(52.dp))
+                        Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(52.dp))
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = if (savedAsUpdate) "Updated Successfully!" else "Submitted Successfully!",
@@ -232,13 +232,17 @@ fun FormSolveScreen(
                                     text = "Intake Form Process Progress",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(1f)
                                 )
                                 Text(
                                     text = "${progressMetrics.first}/${progressMetrics.second} completed",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.secondary
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(start = 8.dp)
                                 )
                             }
                             Spacer(modifier = Modifier.height(8.dp))
@@ -258,12 +262,12 @@ fun FormSolveScreen(
                 // --- RECORD SETUP CARD ---
                 item {
                     Card(
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.8f)), shape = RoundedCornerShape(14.dp))
+                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.8f)), shape = RoundedCornerShape(12.dp))
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -271,7 +275,7 @@ fun FormSolveScreen(
                         ) {
                             Text("1. Record Setup & Patient Link", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             
-                            Text("Bind Patient Profile:", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                            Text("Bind Patient Profile:", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
 
                             var patientListExpanded by remember { mutableStateOf(false) }
                             Box(modifier = Modifier.fillMaxWidth()) {
@@ -308,7 +312,7 @@ fun FormSolveScreen(
 
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                             
-                            Text("Custom Log Name / Title:", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                            Text("Custom Log Name / Title:", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
                             
                             OutlinedTextField(
                                 value = entryTitle,
@@ -320,7 +324,7 @@ fun FormSolveScreen(
                                 trailingIcon = {
                                     if (entryTitle.isNotEmpty()) {
                                         IconButton(onClick = { entryTitle = "" }) {
-                                            Icon(Icons.Default.Clear, contentDescription = "Clear text")
+                                            Icon(Icons.Rounded.Clear, contentDescription = "Clear text")
                                         }
                                     }
                                 },
@@ -341,8 +345,9 @@ fun FormSolveScreen(
                             Text(
                                 text = section.title.uppercase(),
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.secondary,
+                                fontSize = 14.sp,
+                                letterSpacing = 0.5.sp,
+                                color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                             )
                         }
@@ -399,11 +404,11 @@ fun FormSolveScreen(
                             }
                         },
                         enabled = !isSaving,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null)
+                        Icon(Icons.Rounded.Check, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = if (editingEntryUid != null) "Update & Save Checklist" else "Commit & Submit Checklist",
@@ -573,7 +578,7 @@ fun SolveFieldCard(
                     .padding(vertical = 4.dp)
             ) {
                 Icon(
-                    imageVector = if (isMinimized) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                    imageVector = if (isMinimized) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.KeyboardArrowUp,
                     contentDescription = if (isMinimized) "Expand Question" else "Minimize Question",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(end = 8.dp)
@@ -588,7 +593,7 @@ fun SolveFieldCard(
                 if (field.isRequired) {
                     Text(
                         text = "* REQUIRED",
-                        fontSize = 9.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(start = 4.dp)
@@ -637,10 +642,10 @@ fun SolveFieldCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Info,
+                            imageVector = Icons.Rounded.Info,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
@@ -1026,9 +1031,9 @@ fun SolveFieldCard(
                                 modifier = Modifier.padding(top = 4.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (showAdvanced) Icons.Default.KeyboardArrowUp else Icons.Default.Add,
+                                    imageVector = if (showAdvanced) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.Add,
                                     contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -1286,9 +1291,9 @@ fun SolveFieldCard(
                                 modifier = Modifier.padding(top = 4.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (showAdvanced) Icons.Default.KeyboardArrowUp else Icons.Default.Add,
+                                    imageVector = if (showAdvanced) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.Add,
                                     contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -1336,7 +1341,7 @@ fun SolveFieldCard(
                             placeholder = { Text("Select date (YYYY-MM-DD)...") },
                             leadingIcon = {
                                 Icon(
-                                    imageVector = Icons.Default.DateRange,
+                                    imageVector = Icons.Rounded.DateRange,
                                     contentDescription = "Select Date"
                                 )
                             },
