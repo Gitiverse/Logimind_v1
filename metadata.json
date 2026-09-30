@@ -1,0 +1,6 @@
+{
+  "name": "LogiMind",
+  "description": "EMR Form Builder and Clinical Logbook with reusable advanced templates, dynamic sections, and conditional rendering.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

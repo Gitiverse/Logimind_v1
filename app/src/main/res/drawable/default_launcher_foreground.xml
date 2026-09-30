@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Book Cover -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,20H54A8,8 0 0 1 62,28V84H32A8,8 0 0 0 24,92Z"/>
+
+    <!-- Book Pages -->
+    <path
+        android:fillColor="#E8F5E9"
+        android:pathData="M54,20H84V92H54Z"/>
+
+    <!-- Center Fold -->
+    <path
+        android:fillColor="#C8E6C9"
+        android:pathData="M53,20H55V92H53Z"/>
+
+    <!-- Text Lines -->
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M34,38H50V41H34Z"/>
+
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M34,48H50V51H34Z"/>
+
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M34,58H50V61H34Z"/>
+
+    <!-- Check Mark -->
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M62,62 L70,70 L82,50 L78,47 L69,63 L65,59 Z"/>
+
+</vector>
