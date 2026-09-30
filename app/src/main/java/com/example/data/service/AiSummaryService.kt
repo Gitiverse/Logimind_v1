@@ -1,50 +1,24 @@
 package com.example.data.service
 
-import com.example.data.model.FormEntry
-import com.example.data.model.ProcedureAnswer
-import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.POST
-import okhttp3.OkHttpClient
+import retrofit2.http.Path
 import java.util.concurrent.TimeUnit
 
-// Structured medical dataset to improve AI precision and consistency
-data class NormalizedMedicalLog(
-    val uid: String,
-    val title: String,
-    val dateStr: String,
-    val createdAt: Long = 0L,
-    val patientName: String,
-    val templateName: String,
-    val chiefComplaintsOrSymptoms: List<String>,
-    val proceduresObserved: List<String>,
-    val medicationsListed: List<String>,
-    val outcomesAndStability: String,
-    val onDutyPerformer: String,
-    val clinicalNotes: String,
-    val proceduresPerformedByMe: List<String> = emptyList(),
-    val proceduresPerformedByOthers: List<String> = emptyList()
-)
-
-// AI Provider interface matching requirements
 interface AiSummaryProvider {
     val id: String
     val displayName: String
-    val isOfflineSupported: Boolean
-    val isPremiumOnly: Boolean
-    
-    suspend fun generateCaseSummary(
-        logs: List<NormalizedMedicalLog>,
-        style: String // "short", "bullets", "timeline", "clinical"
-    ): String
+    val sendsDataOffDevice: Boolean
+
+    suspend fun generate(input: SummaryInput): String
 }
 
 object AiSummaryService {
@@ -52,345 +26,159 @@ object AiSummaryService {
     @Volatile
     var customApiKey: String = ""
 
-    // Written only when data is missing; the summary never invents clinical content.
-    private const val NOT_RECORDED = "Not recorded"
+    // "gemini-2.5-flash-lite" (fast, default) or "gemini-2.5-flash" (better quality).
+    @Volatile
+    var geminiModel: String = MODEL_FAST
 
-    // 1. Data Normalization pipeline - Converts dynamic schema logs into structured clinical fields.
-    // Answers are keyed by field UID, so classification uses the question label from fieldLabelMap.
-    fun normalizeLogs(entries: List<FormEntry>, fieldLabelMap: Map<String, String> = emptyMap()): List<NormalizedMedicalLog> {
-        val format = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault())
-        return entries.map { entry ->
-            val symptomsList = mutableListOf<String>()
-            val proceduresList = mutableListOf<String>()
-            val medsList = mutableListOf<String>()
-            val proceduresMeList = mutableListOf<String>()
-            val proceduresOthersList = mutableListOf<String>()
-            val outcomes = mutableListOf<String>()
-            val notesList = mutableListOf<String>()
-            val otherAnswers = mutableListOf<String>()
-            var performer = NOT_RECORDED
- 
-            try {
-                if (!entry.answersJson.isBlank()) {
-                    val answers = JSONObject(entry.answersJson)
-                    val keys = answers.keys()
-                    while (keys.hasNext()) {
-                        val key = keys.next()
-                        val value = answers.optString(key)
-                        if (value.isBlank()) continue
-                        val label = fieldLabelMap[key] ?: key.replace("field-", "").replace("-", " ")
-                        val match = label.lowercase()
+    const val MODEL_FAST = "gemini-2.5-flash-lite"
+    const val MODEL_BETTER = "gemini-2.5-flash"
 
-                        if (ProcedureAnswer.isProcedure(value)) {
-                            for (item in ProcedureAnswer.completedItems(value)) {
-                                if (item.performedByMe) proceduresMeList.add(item.name) else proceduresOthersList.add(item.name)
-                            }
-                        } else {
-                            val display = when (value) {
-                                "true" -> "Yes"
-                                "false" -> "No"
-                                else -> value
-                            }
-                            val line = "$label: $display"
-                            // Infer structure from the question label; anything else is still reported.
-                            if (match.contains("symptom") || match.contains("history") || match.contains("complaint") || match.contains("severity")) {
-                                symptomsList.add(line)
-                            } else if (match.contains("bp") || match.contains("vital") || match.contains("stable") || match.contains("outcome")) {
-                                outcomes.add(line)
-                            } else if (match.contains("technique") || match.contains("procedure") || match.contains("bypass") || match.contains("airway")) {
-                                proceduresList.add(line)
-                            } else if (match.contains("med") || match.contains("drug") || match.contains("dose")) {
-                                medsList.add(line)
-                            } else if (match.contains("note") || match.contains("comment") || match.contains("description")) {
-                                notesList.add(line)
-                            } else {
-                                otherAnswers.add(line)
-                            }
-                        }
-                    }
-                }
-                
-                // Add structured sublists to the main procedures list
-                proceduresList.addAll(proceduresMeList)
-                proceduresList.addAll(proceduresOthersList)
+    // Added by the app under every summary (never left to the model).
+    const val FOOTER = "AI draft from logged data — check before clinical use."
 
-                // Extract performer from the first recorded attribution if present
-                if (!entry.attributionsJson.isNullOrBlank()) {
-                    val atts = JSONObject(entry.attributionsJson)
-                    val keys = atts.keys()
-                    if (keys.hasNext()) {
-                        val firstAttr = atts.optJSONObject(keys.next())
-                        if (firstAttr != null) {
-                            val name = firstAttr.optString("providerName", "")
-                            val type = firstAttr.optString("providerType", "")
-                            if (name.isNotBlank()) {
-                                performer = "$name ($type)"
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                notesList.add("Error processing: ${e.localizedMessage}")
-            }
- 
-            NormalizedMedicalLog(
-                uid = entry.uid,
-                title = entry.title,
-                dateStr = format.format(Date(entry.createdAt)),
-                createdAt = entry.createdAt,
-                patientName = entry.patientName ?: "Theatre Profile",
-                templateName = entry.templateName ?: "Dynamic Checklist",
-                chiefComplaintsOrSymptoms = (symptomsList + otherAnswers).distinct(),
-                proceduresObserved = proceduresList.distinct(),
-                medicationsListed = medsList.distinct(),
-                outcomesAndStability = outcomes.joinToString("; ").ifBlank { NOT_RECORDED },
-                onDutyPerformer = performer,
-                clinicalNotes = notesList.joinToString("; ").ifBlank { NOT_RECORDED },
-                proceduresPerformedByMe = proceduresMeList.distinct(),
-                proceduresPerformedByOthers = proceduresOthersList.distinct()
-            )
-        }
+    val providers: List<AiSummaryProvider> = listOf(LocalOfflineProvider(), GeminiProvider())
+
+    // ---------------- Prompt (shared rules + one instruction per purpose) ----------------
+
+    const val SYSTEM_INSTRUCTION = """You summarise clinical logbook entries for the clinician who recorded them.
+Rules:
+- Use ONLY the data provided in the JSON. Never add diagnoses, medications, vital signs, test results, recommendations or plans that are not in the data.
+- If something relevant is missing, write "Not recorded". Do not guess or speculate.
+- Keep each procedure's role exactly as given: "performed by me", "assisted / performed by another clinician" or "role not recorded". Keep supervisor names and whether they verified exactly as given.
+- Keep numbers, units and dates exactly as recorded.
+- Refer to patients only by their id (e.g. "Patient 1"). Never invent names or identifiers.
+- Plain, concise clinical English. Plain text only: headings on their own line, "- " bullets, no markdown symbols such as ** or #.
+- Follow the requested format and length exactly."""
+
+    fun purposeInstruction(purpose: SummaryPurpose): String = when (purpose) {
+        SummaryPurpose.CASE -> """Write a CASE SUMMARY of the log(s) using exactly these headings:
+Summary: one sentence (patient id, age if recorded, form, date).
+Findings: bullets of the key recorded answers.
+Procedures: bullets "procedure — role — supervisor (verified or not)"; "None recorded" if empty.
+Outcome: from the recorded answers, otherwise "Not recorded".
+Not recorded: bullets of important questions that were left blank.
+Maximum 150 words."""
+        SummaryPurpose.TIMELINE -> """Write a PATIENT TIMELINE using exactly these headings:
+Timeline: one bullet per log in date order: "date — form: key findings; procedures (role)".
+Changes over time: 1 to 3 bullets on what changed between logs, only if the data shows it; otherwise "No change recorded".
+Maximum 200 words."""
+        SummaryPurpose.LOGBOOK -> """Write a PROCEDURE LOGBOOK summary using exactly these headings:
+Performed by me: bullets "procedure — date — patient id — supervisor (verified or not)".
+Assisted: same bullet format.
+Role not recorded: same bullet format.
+Totals: one line with counts for each heading.
+Write "None" under an empty heading. Do not add clinical commentary.
+Maximum 200 words."""
     }
 
-    // 2. Concrete AI Providers List
-    val providers: List<AiSummaryProvider> = listOf(
-        LocalOfflineProvider(),
-        GeminiProProvider(),
-        OpenAiGpt4Provider(),
-        ClaudeSonnetProvider()
-    )
+    fun userPrompt(input: SummaryInput): String =
+        purposeInstruction(input.purpose) + "\n\nData (JSON):\n" + input.toCloudJson().toString(2)
 
-    // --- Provider Implementation 1: Local Offline (Rule-Based High Fidelity) ---
+    // ---------------- Offline provider: same headings, filled directly from the data ----------------
+
     class LocalOfflineProvider : AiSummaryProvider {
         override val id = "local_offline"
-        override val displayName = "LogiMind Local AI (Offline)"
-        override val isOfflineSupported = true
-        override val isPremiumOnly = false
+        override val displayName = "LogiMind Local (offline)"
+        override val sendsDataOffDevice = false
 
-        override suspend fun generateCaseSummary(
-            logs: List<NormalizedMedicalLog>,
-            style: String
-        ): String {
-            if (logs.isEmpty()) return "No clinical entries provided to formulate a summary."
+        override suspend fun generate(input: SummaryInput): String {
+            if (input.logs.isEmpty()) return "No logs selected."
+            return when (input.purpose) {
+                SummaryPurpose.CASE -> caseSummary(input)
+                SummaryPurpose.TIMELINE -> timeline(input)
+                SummaryPurpose.LOGBOOK -> logbook(input)
+            }
+        }
 
-            val sb = java.lang.StringBuilder()
-            val patientName = logs.firstOrNull()?.patientName ?: "Theatre"
+        private fun procedureLine(p: SummaryProcedure) =
+            "${p.name} — ${SummaryInput.roleText(p.performedByMe)} — " +
+                (if (p.supervisor.isBlank()) "supervisor not recorded" else "supervisor ${p.supervisor} (${if (p.verified) "verified" else "not verified"})")
 
-            when (style) {
-                "short" -> {
-                    sb.append("CLINICAL CASE SUMMARY FOR PATIENT: $patientName\n")
-                    sb.append("A synthesis of ${logs.size} clinical session logs shows a medical trajectory focused on ${logs.map { it.templateName }.distinct().joinToString(", ")}. ")
-                    
-                    val pbMe = logs.flatMap { it.proceduresPerformedByMe }.distinct()
-                    val pbOthers = logs.flatMap { it.proceduresPerformedByOthers }.distinct()
-                    if (pbMe.isNotEmpty()) {
-                        sb.append("Doctor personally performed procedure(s): ${pbMe.joinToString(", ")}. ")
-                    }
-                    if (pbOthers.isNotEmpty()) {
-                        sb.append("Other procedures performed by other clinicians include: ${pbOthers.joinToString(", ")}. ")
-                    }
+        private fun caseSummary(input: SummaryInput): String = buildString {
+            for (log in input.logs) {
+                val age = input.patients.find { it.alias == log.patientAlias }?.age
+                appendLine("Summary:")
+                appendLine("${log.patientAlias ?: "No patient profile"}${if (age != null) ", age $age" else ""} — ${log.templateName} — ${input.formatDate(log.date)}")
+                val answered = log.sections.flatMap { it.answers }.filter { it.answer != NOT_RECORDED }
+                val missing = log.sections.flatMap { it.answers }.filter { it.answer == NOT_RECORDED }
+                appendLine("Findings:")
+                if (answered.isEmpty()) appendLine("- $NOT_RECORDED") else answered.forEach { appendLine("- ${it.question}: ${it.answer}") }
+                appendLine("Procedures:")
+                if (log.procedures.isEmpty()) appendLine("- None recorded") else log.procedures.forEach { appendLine("- ${procedureLine(it)}") }
+                appendLine("Not recorded:")
+                if (missing.isEmpty()) appendLine("- Nothing left blank") else missing.forEach { appendLine("- ${it.question}") }
+                if (input.logs.size > 1) appendLine()
+            }
+        }.trim()
 
-                    val symptoms = logs.flatMap { it.chiefComplaintsOrSymptoms }.distinct()
-                    if (symptoms.isNotEmpty()) {
-                        sb.append("Clinical assessment findings noted: ${symptoms.joinToString(", ")}. ")
-                    }
-                    
-                    sb.append("Current status is documented as: ${logs.map { it.outcomesAndStability }.joinToString("; ")}. ")
-                    sb.append("Recorded by: ${logs.map { it.onDutyPerformer }.distinct().joinToString(", ")}.")
-                }
-                
-                "bullets" -> {
-                    sb.append("CASE ANALYSIS OUTLINE: $patientName\n")
-                    sb.append("========================================\n")
-                    sb.append("• Trajectory: Summarizing ${logs.size} clinical logs under EMR templates.\n")
-                    
-                    val symptoms = logs.flatMap { it.chiefComplaintsOrSymptoms }.distinct()
-                    if (symptoms.isNotEmpty()) {
-                        sb.append("• Recorded Findings: ${symptoms.joinToString("; ")}\n")
-                    }
-                    
-                    val pbMe = logs.flatMap { it.proceduresPerformedByMe }.distinct()
-                    val pbOthers = logs.flatMap { it.proceduresPerformedByOthers }.distinct()
-                    if (pbMe.isNotEmpty()) {
-                        sb.append("• Procedures Personally Performed: ${pbMe.joinToString(", ")}\n")
-                    }
-                    if (pbOthers.isNotEmpty()) {
-                        sb.append("• Procedures Performed by Others: ${pbOthers.joinToString(", ")}\n")
-                    }
-                    
-                    val meds = logs.flatMap { it.medicationsListed }.distinct()
-                    if (meds.isNotEmpty()) {
-                        sb.append("• Pharmacotherapy: ${meds.joinToString(", ")}\n")
-                    } else {
-                        sb.append("• Pharmacotherapy: $NOT_RECORDED\n")
-                    }
-                    
-                    sb.append("• Overall Patient Outcomes: ${logs.map { it.outcomesAndStability }.distinct().joinToString("; ")}\n")
-                    sb.append("• Staff Hand-off Attribution: ${logs.map { it.onDutyPerformer }.distinct().joinToString(", ")}\n")
-                }
-                
-                "timeline" -> {
-                    sb.append("CLINICAL MEDICAL RECORD TIMELINE: $patientName\n")
-                    sb.append("========================================\n")
-                    for (log in logs.sortedBy { it.createdAt }) {
-                        sb.append("${log.dateStr} [${log.templateName}]:\n")
-                        if (log.proceduresPerformedByMe.isNotEmpty()) {
-                            sb.append("  - Personally Performed: ${log.proceduresPerformedByMe.joinToString(", ")}\n")
-                        }
-                        if (log.proceduresPerformedByOthers.isNotEmpty()) {
-                            sb.append("  - Performed by Others: ${log.proceduresPerformedByOthers.joinToString(", ")}\n")
-                        }
-                        sb.append("  - Status/Outcome: ${log.outcomesAndStability}\n")
-                        sb.append("  - Provider: ${log.onDutyPerformer}\n\n")
-                    }
-                }
-                
-                else -> { // clinical
-                    sb.append("COMPREHENSIVE CLINICAL CASE OVERVIEW\n")
-                    sb.append("========================================\n")
-                    sb.append("Patient: $patientName\n")
-                    sb.append("Assessment Logs Compiled: ${logs.size} session record(s)\n")
-                    sb.append("Focus Areas: ${logs.map { it.templateName }.distinct().joinToString(" & ")}\n\n")
-                    
-                    sb.append("1. ASSESSMENT & PRESENTATION FINDINGS:\n")
-                    val complaints = logs.flatMap { it.chiefComplaintsOrSymptoms }
-                    if (complaints.isNotEmpty()) {
-                        complaints.forEach { sb.append("   - $it\n") }
-                    } else {
-                        sb.append("   - $NOT_RECORDED\n")
-                    }
-                    
-                    sb.append("\n2. EXECUTED THERAPEUTIC PROCEDURES:\n")
-                    val pbMe = logs.flatMap { it.proceduresPerformedByMe }.distinct()
-                    val pbOthers = logs.flatMap { it.proceduresPerformedByOthers }.distinct()
-                    if (pbMe.isNotEmpty()) {
-                        sb.append("   * Personally Performed by Doctor:\n")
-                        pbMe.forEach { sb.append("     - $it\n") }
-                    }
-                    if (pbOthers.isNotEmpty()) {
-                        sb.append("   * Performed by Other Clinicians:\n")
-                        pbOthers.forEach { sb.append("     - $it\n") }
-                    }
-                    if (pbMe.isEmpty() && pbOthers.isEmpty()) {
-                        sb.append("   - $NOT_RECORDED\n")
-                    }
-                    
-                    sb.append("\n3. VITAL OUTCOMES & STABILITY MARGINS:\n")
-                    logs.forEach { log ->
-                        sb.append("   - [${log.dateStr}]: ${log.outcomesAndStability}\n")
-                    }
+        private fun timeline(input: SummaryInput): String = buildString {
+            appendLine("Timeline:")
+            for (log in input.logs) {
+                val findings = log.sections.flatMap { it.answers }.filter { it.answer != NOT_RECORDED }
+                    .joinToString("; ") { "${it.question}: ${it.answer}" }.ifBlank { NOT_RECORDED }
+                val procs = if (log.procedures.isEmpty()) "" else "; procedures: " +
+                    log.procedures.joinToString(", ") { "${it.name} (${SummaryInput.roleText(it.performedByMe)})" }
+                appendLine("- ${input.formatDate(log.date)} — ${log.templateName}: $findings$procs")
+            }
+            appendLine("Changes over time:")
+            appendLine("- Compare the entries above (the offline summary does not interpret changes).")
+        }.trim()
 
-                    sb.append("\n4. MEDICATIONS & PHARMACY ORDERS:\n")
-                    val meds = logs.flatMap { it.medicationsListed }
-                    if (meds.isNotEmpty()) {
-                        meds.forEach { sb.append("   - $it\n") }
-                    } else {
-                        sb.append("   - $NOT_RECORDED\n")
-                    }
-
-                    sb.append("\n5. COMPLICATIONS & CLINICAL NOTES:\n")
-                    val notes = logs.map { "[${it.dateStr}]: ${it.clinicalNotes}" }
-                    notes.forEach { sb.append("   - $it\n") }
+        private fun logbook(input: SummaryInput): String = buildString {
+            val rows = input.logs.flatMap { log -> log.procedures.map { log to it } }
+            fun section(title: String, filter: (SummaryProcedure) -> Boolean) {
+                val items = rows.filter { filter(it.second) }
+                appendLine("$title:")
+                if (items.isEmpty()) appendLine("- None")
+                items.forEach { (log, p) ->
+                    val sup = if (p.supervisor.isBlank()) "supervisor not recorded" else "supervisor ${p.supervisor} (${if (p.verified) "verified" else "not verified"})"
+                    appendLine("- ${p.name} — ${input.formatDate(log.date)} — ${log.patientAlias ?: "No patient profile"} — $sup")
                 }
             }
-            return sb.toString()
-        }
+            section("Performed by me") { it.performedByMe == true }
+            section("Assisted") { it.performedByMe == false }
+            section("Role not recorded") { it.performedByMe == null }
+            append("Totals: performed by me ${rows.count { it.second.performedByMe == true }}, ")
+            append("assisted ${rows.count { it.second.performedByMe == false }}, ")
+            append("role not recorded ${rows.count { it.second.performedByMe == null }}")
+        }.trim()
     }
 
-    // --- Provider 2: Gemini PRO (Prompt Builder Ready for Server Side) ---
-    class GeminiProProvider : AiSummaryProvider {
-        override val id = "gemini_pro"
-        override val displayName = "Google Gemini Pro AI (Cloud)"
-        override val isOfflineSupported = false
-        override val isPremiumOnly = true
+    // ---------------- Gemini provider ----------------
 
-        override suspend fun generateCaseSummary(
-            logs: List<NormalizedMedicalLog>,
-            style: String
-        ): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            if (AiSummaryService.customApiKey.isBlank()) {
+    class GeminiProvider : AiSummaryProvider {
+        override val id = "gemini_pro"
+        override val displayName = "Google Gemini (cloud)"
+        override val sendsDataOffDevice = true
+
+        override suspend fun generate(input: SummaryInput): String = withContext(Dispatchers.IO) {
+            if (customApiKey.isBlank()) {
                 return@withContext "⚠️ No Gemini API key saved.\n\nOpen Settings (gear icon, top right) and paste your Gemini API key, or choose \"LogiMind Local\" to summarise without internet."
             }
-
-            // Prompt construction for server side execution
-            val pBuilder = StringBuilder()
-            pBuilder.append("System Prompt: You are an EMR Clinical AI Assistant. Summarize these structured medical logs under style '$style' for patient '${logs.firstOrNull()?.patientName}'. Minimize walls of text, render as clinically precise summaries under 1000 words.\n")
-            pBuilder.append("CRITICAL: When summarizing, you must distinguish between procedures personally performed by the doctor ('Procedures Personally Performed by Doctor') and procedures performed by other clinicians ('Procedures Performed by Others'). Direct examples to use: 'Doctor personally performed [Procedures]' and '[Procedures] was performed by another clinician'.\n\n")
-            logs.forEach { log ->
-                pBuilder.append("Log Date: ${log.dateStr} | Title: ${log.title}\n")
-                pBuilder.append("Findings: ${log.chiefComplaintsOrSymptoms.joinToString(", ")}\n")
-                pBuilder.append("Procedures Personally Performed by Doctor: ${log.proceduresPerformedByMe.joinToString(", ")}\n")
-                pBuilder.append("Procedures Performed by Others: ${log.proceduresPerformedByOthers.joinToString(", ")}\n")
-                pBuilder.append("Meds: ${log.medicationsListed.joinToString(", ")}\n")
-                pBuilder.append("Outcomes: ${log.outcomesAndStability}\n")
-                pBuilder.append("Notes: ${log.clinicalNotes}\n")
-                pBuilder.append("------------------------------------\n")
-            }
-
+            if (input.logs.isEmpty()) return@withContext "No logs selected."
             try {
                 val request = GeminiRequest(
-                    contents = listOf(
-                        GeminiContent(
-                            parts = listOf(
-                                GeminiContentPart(text = pBuilder.toString())
-                            )
-                        )
-                    )
+                    contents = listOf(GeminiContent(parts = listOf(GeminiContentPart(text = userPrompt(input))))),
+                    systemInstruction = GeminiContent(parts = listOf(GeminiContentPart(text = SYSTEM_INSTRUCTION))),
+                    generationConfig = GeminiGenerationConfig(temperature = 0.2, maxOutputTokens = 1024)
                 )
-                val response = GeminiClient.service.generateContent(AiSummaryService.customApiKey, request)
-                val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                if (!responseText.isNullOrBlank()) {
-                    return@withContext responseText
-                } else {
-                    return@withContext "⚠️ Gemini returned an empty summary. Please try again."
-                }
+                val response = GeminiClient.service.generateContent(geminiModel, customApiKey, request)
+                val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (text.isNullOrBlank()) "⚠️ Gemini returned an empty summary. Please try again." else text.trim()
             } catch (e: retrofit2.HttpException) {
-                val errDetails = try {
-                    e.response()?.errorBody()?.string() ?: ""
-                } catch (ex: Throwable) {
-                    ""
-                }
+                val errDetails = try { e.response()?.errorBody()?.string() ?: "" } catch (ex: Throwable) { "" }
                 val reason = when (e.code()) {
                     400, 401, 403 -> "The API key was not accepted. Check it in Settings."
+                    404 -> "The selected Gemini model is not available for this key. Try the other model in Settings."
                     429 -> "Gemini's usage limit was reached. Wait a little and try again, or check your quota in Google AI Studio."
                     in 500..599 -> "Gemini is having problems right now. Try again later."
                     else -> "Gemini could not create the summary."
                 }
                 val details = if (errDetails.isNotBlank()) "\n\nTechnical details (error ${e.code()}): ${errDetails.take(300)}" else ""
-                return@withContext "❌ $reason$details"
+                "❌ $reason$details"
             } catch (e: Throwable) {
-                return@withContext "❌ Could not reach Gemini. Check the internet connection and try again.\n\nTechnical details: ${e.localizedMessage ?: e.toString()}"
+                "❌ Could not reach Gemini. Check the internet connection and try again.\n\nTechnical details: ${e.localizedMessage ?: e.toString()}"
             }
-        }
-    }
-
-    // --- Provider 3: OpenAI GPT-4 (SaaS monetization ready) ---
-    class OpenAiGpt4Provider : AiSummaryProvider {
-        override val id = "openai_gpt4"
-        override val displayName = "OpenAI GPT-4 Turbo"
-        override val isOfflineSupported = false
-        override val isPremiumOnly = true
-
-        override suspend fun generateCaseSummary(
-            logs: List<NormalizedMedicalLog>,
-            style: String
-        ): String {
-            return "⚠️ NOT AVAILABLE YET\n\nThe GPT-4 engine is not connected in this version. Use LogiMind Local or Gemini."
-        }
-    }
-
-    // --- Provider 4: Anthropic Claude 3 (SaaS monetization ready) ---
-    class ClaudeSonnetProvider : AiSummaryProvider {
-        override val id = "claude_sonnet"
-        override val displayName = "Anthropic Claude 3.5 Sonnet"
-        override val isOfflineSupported = false
-        override val isPremiumOnly = true
-
-        override suspend fun generateCaseSummary(
-            logs: List<NormalizedMedicalLog>,
-            style: String
-        ): String {
-            return "⚠️ NOT AVAILABLE YET\n\nThe Claude engine is not connected in this version. Use LogiMind Local or Gemini."
         }
     }
 }
@@ -407,8 +195,16 @@ data class GeminiContent(
 )
 
 @JsonClass(generateAdapter = true)
+data class GeminiGenerationConfig(
+    @Json(name = "temperature") val temperature: Double? = null,
+    @Json(name = "maxOutputTokens") val maxOutputTokens: Int? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class GeminiRequest(
-    @Json(name = "contents") val contents: List<GeminiContent>
+    @Json(name = "contents") val contents: List<GeminiContent>,
+    @Json(name = "systemInstruction") val systemInstruction: GeminiContent? = null,
+    @Json(name = "generationConfig") val generationConfig: GeminiGenerationConfig? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -423,8 +219,9 @@ data class GeminiResponse(
 
 // --- Retrofit & OkHttp client for Gemini API ---
 interface GeminiApiService {
-    @POST("v1beta/models/gemini-2.5-flash-lite:generateContent")
+    @POST("v1beta/models/{model}:generateContent")
     suspend fun generateContent(
+        @Path("model") model: String,
         // Header, not a URL query parameter, so the key does not end up in URL logs.
         @Header("x-goog-api-key") apiKey: String,
         @Body request: GeminiRequest

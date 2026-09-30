@@ -167,7 +167,9 @@ fun HomeScreen(
     }
 
     // AI Panel interactive state controllers
-    var selectedAiStyle by remember { mutableStateOf("short") }
+    var selectedAiPurpose by remember { mutableStateOf(com.example.data.service.SummaryPurpose.CASE) }
+    var aiPatientKey by remember { mutableStateOf("") }
+    var sentPreviewText by remember { mutableStateOf<String?>(null) }
     var selectedAiProvider by remember { mutableStateOf("local_offline") }
     var aiGeneratedSummaryText by remember { mutableStateOf("") }
     var aiIsSynthesizing by remember { mutableStateOf(false) }
@@ -281,43 +283,37 @@ fun HomeScreen(
         }
     }
 
+    // New selection: clear the old summary and pick the purpose that fits the logs.
     LaunchedEffect(selectedEntriesForAiSummary) {
         aiGeneratedSummaryText = ""
+        aiPatientKey = ""
+        selectedAiPurpose = com.example.data.service.SummaryInputBuilder.defaultPurpose(selectedEntriesForAiSummary)
     }
 
     LaunchedEffect(aiRunRequest) {
         if (aiRunRequest > 0 && selectedEntriesForAiSummary.isNotEmpty()) {
             aiIsSynthesizing = true
-            aiGeneratedSummaryText = "Normalizing dynamic EMR schema fields and activating AI pipeline..."
-            
+            aiGeneratedSummaryText = "Preparing summary..."
+            aiPatientKey = ""
+
             val currentEntries = selectedEntriesForAiSummary
-            val currentStyle = selectedAiStyle
+            val currentPurpose = selectedAiPurpose
             val currentProvider = selectedAiProvider
-            val currentTier = subscriptionTier
 
             try {
-                // Ensure all complex JSON parsing and networking tasks run on the background Dispatcher
-                val resultSummary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    val normalized = com.example.data.service.AiSummaryService.normalizeLogs(currentEntries, fieldLabelMap)
-                    val provider = com.example.data.service.AiSummaryService.providers.find { it.id == currentProvider }
-                    if (provider != null) {
-                        if (provider.isPremiumOnly && currentTier == SubscriptionTier.FREE) {
-                            "⚠️ UPGRADE REQUIRED\n\nThe chosen provider '${provider.displayName}' is limited to Premium clinical staff tiers.\n\nTurn on 'PRO' mode in the top right header badge to run instant summaries with premium engines!"
-                        } else {
-                            provider.generateCaseSummary(normalized, currentStyle)
-                        }
-                    } else {
-                        "Provider error."
-                    }
-                }
-                
-                // Update UI state on Main Thread
-                aiGeneratedSummaryText = resultSummary
-                if (!resultSummary.startsWith("⚠️") && !resultSummary.startsWith("❌") && !resultSummary.contains("Provider error") && !resultSummary.contains("EXCEPT")) {
-                    viewModel.incrementAiSummaryCount()
-                }
+                val input = viewModel.buildSummaryInput(currentEntries, currentPurpose)
+                val provider = com.example.data.service.AiSummaryService.providers.find { it.id == currentProvider }
+                    ?: com.example.data.service.AiSummaryService.providers.first()
+                val resultSummary = provider.generate(input)
+                val failed = resultSummary.startsWith("⚠️") || resultSummary.startsWith("❌")
+
+                aiGeneratedSummaryText = if (failed) resultSummary
+                else resultSummary + "\n\n" + com.example.data.service.AiSummaryService.FOOTER
+                // Aliases are mapped back to real patients on the phone only.
+                aiPatientKey = if (failed) "" else input.patientKey()
+                if (!failed) viewModel.incrementAiSummaryCount()
             } catch (e: Throwable) {
-                aiGeneratedSummaryText = "AI Synthesis exception: ${e.localizedMessage ?: "Unknown initialization/network failure"}"
+                aiGeneratedSummaryText = "❌ The summary could not be created: ${e.localizedMessage ?: "unknown error"}"
             } finally {
                 aiIsSynthesizing = false
             }
@@ -1190,7 +1186,7 @@ fun HomeScreen(
                                             // Options & Parameters Selector
                                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 Text(
-                                                    text = "Configure Presentation Style:",
+                                                    text = "What is this summary for?",
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = MaterialTheme.colorScheme.secondary
@@ -1199,16 +1195,15 @@ fun HomeScreen(
                                                     modifier = Modifier.fillMaxWidth(),
                                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
-                                                    val styles = listOf(
-                                                        "short" to "Executive",
-                                                        "bullets" to "Outlines",
-                                                        "timeline" to "Timeline",
-                                                        "clinical" to "SOAP Check"
+                                                    val purposes = listOf(
+                                                        com.example.data.service.SummaryPurpose.CASE to "Case summary",
+                                                        com.example.data.service.SummaryPurpose.TIMELINE to "Timeline",
+                                                        com.example.data.service.SummaryPurpose.LOGBOOK to "Logbook"
                                                     )
-                                                    styles.forEach { (id, label) ->
-                                                        val isStyleSel = selectedAiStyle == id
+                                                    purposes.forEach { (id, label) ->
+                                                        val isStyleSel = selectedAiPurpose == id
                                                         Surface(
-                                                            onClick = { selectedAiStyle = id },
+                                                            onClick = { selectedAiPurpose = id },
                                                             shape = RoundedCornerShape(20),
                                                             color = if (isStyleSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                                                             border = if (isStyleSel) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
@@ -1288,6 +1283,26 @@ fun HomeScreen(
 
                                             Spacer(modifier = Modifier.height(4.dp))
 
+                                            // Exactly what leaves the phone for the chosen engine
+                                            TextButton(
+                                                onClick = {
+                                                    scope.launch {
+                                                        val input = viewModel.buildSummaryInput(selectedEntriesForAiSummary, selectedAiPurpose)
+                                                        sentPreviewText = if (selectedAiProvider == "local_offline") {
+                                                            "LogiMind Local works on this phone. Nothing is sent anywhere."
+                                                        } else {
+                                                            "Sent to Google Gemini (no names, MRNs, phone numbers or entry titles; free-text answers are sent as written):\n\n" +
+                                                                com.example.data.service.AiSummaryService.userPrompt(input)
+                                                        }
+                                                    }
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 4.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("What will be sent?", fontSize = 12.sp)
+                                            }
+
                                             Button(
                                                 onClick = { aiRunRequest++ },
                                                 enabled = !aiIsSynthesizing,
@@ -1315,7 +1330,7 @@ fun HomeScreen(
                                                     ) {
                                                         val providerName = com.example.data.service.AiSummaryService.providers.find { it.id == selectedAiProvider }?.displayName ?: "AI Model"
                                                         Text(
-                                                            text = "$providerName Diagnostics Draft",
+                                                            text = "${selectedAiPurpose.label} • $providerName",
                                                             fontSize = 11.sp,
                                                             fontWeight = FontWeight.SemiBold,
                                                             color = MaterialTheme.colorScheme.primary
@@ -1329,12 +1344,22 @@ fun HomeScreen(
                                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                                     }
 
-                                                    Text(
-                                                        text = aiGeneratedSummaryText,
-                                                        fontSize = 11.sp,
-                                                        lineHeight = 16.sp,
-                                                        color = MaterialTheme.colorScheme.onSurface
-                                                    )
+                                                    androidx.compose.foundation.text.selection.SelectionContainer {
+                                                        Text(
+                                                            text = aiGeneratedSummaryText,
+                                                            fontSize = 13.sp,
+                                                            lineHeight = 19.sp,
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                    }
+                                                    if (aiPatientKey.isNotBlank()) {
+                                                        HorizontalDivider()
+                                                        Text(
+                                                            text = "Patient key (on this phone only):\n$aiPatientKey",
+                                                            fontSize = 11.sp,
+                                                            color = MaterialTheme.colorScheme.secondary
+                                                        )
+                                                    }
                                                 }
                                             }
 
@@ -1345,10 +1370,13 @@ fun HomeScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
+                                                val summaryWithKey = if (aiPatientKey.isBlank()) aiGeneratedSummaryText
+                                                    else "$aiGeneratedSummaryText\n\n$aiPatientKey"
                                                 Button(
                                                     onClick = {
-                                                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(aiGeneratedSummaryText))
+                                                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(summaryWithKey))
                                                     },
+                                                    enabled = aiGeneratedSummaryText.isNotBlank() && !aiIsSynthesizing,
                                                     shape = RoundedCornerShape(8.dp),
                                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                                     modifier = Modifier.height(36.dp),
@@ -1356,7 +1384,26 @@ fun HomeScreen(
                                                 ) {
                                                     Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                                                     Spacer(modifier = Modifier.width(6.dp))
-                                                    Text("Copy Clinical Text", fontSize = 11.sp)
+                                                    Text("Copy", fontSize = 12.sp)
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                            type = "text/plain"
+                                                            putExtra(android.content.Intent.EXTRA_SUBJECT, "LogiMind ${selectedAiPurpose.label}")
+                                                            putExtra(android.content.Intent.EXTRA_TEXT, summaryWithKey)
+                                                        }
+                                                        context.startActivity(android.content.Intent.createChooser(send, "Share summary"))
+                                                    },
+                                                    enabled = aiGeneratedSummaryText.isNotBlank() && !aiIsSynthesizing,
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    modifier = Modifier.height(36.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                                                ) {
+                                                    Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("Share", fontSize = 12.sp)
                                                 }
 
                                                 TextButton(onClick = { selectedEntryForAiSummary = null; selectedEntriesForAiSummary = emptyList() }) {
@@ -2510,6 +2557,24 @@ fun HomeScreen(
                     HorizontalDivider()
 
                     Text("Gemini API Key", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+
+                    // Model used for Gemini summaries
+                    val geminiModel by viewModel.geminiModel.collectAsState()
+                    Text("Gemini model", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        val models = listOf(
+                            com.example.data.service.AiSummaryService.MODEL_FAST to "Fast",
+                            com.example.data.service.AiSummaryService.MODEL_BETTER to "Better"
+                        )
+                        models.forEachIndexed { index, (model, label) ->
+                            SegmentedButton(
+                                selected = geminiModel == model,
+                                onClick = { viewModel.setGeminiModel(model) },
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = models.size),
+                                label = { Text(label, fontSize = 12.sp) }
+                            )
+                        }
+                    }
                     Text(
                         text = "To run real-time clinical summarizations secure and free, paste your personal Google Gemini API key.",
                         fontSize = 13.sp,
@@ -2567,7 +2632,9 @@ fun HomeScreen(
                                                 )
                                             )
                                             val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                com.example.data.service.GeminiClient.service.generateContent(localApiKey.trim(), request)
+                                                com.example.data.service.GeminiClient.service.generateContent(
+                                                    com.example.data.service.AiSummaryService.geminiModel, localApiKey.trim(), request
+                                                )
                                             }
                                             val result = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                                             if (!result.isNullOrBlank()) {
@@ -2822,12 +2889,34 @@ fun HomeScreen(
         )
     }
 
+    sentPreviewText?.let { preview ->
+        AlertDialog(
+            onDismissRequest = { sentPreviewText = null },
+            title = { Text("What will be sent") },
+            text = {
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(
+                        text = preview,
+                        fontSize = 11.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { sentPreviewText = null }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
     if (showCloudAiConsentFor != null) {
         AlertDialog(
             onDismissRequest = { showCloudAiConsentFor = null },
             title = { Text("Send logs to Google Gemini?") },
             text = {
-                Text("The selected log contents, including patient names and answers, will be sent to Google's Gemini API to write the summary. Only continue if your data policy allows this.")
+                Text("The selected logs are sent to Google's Gemini API to write the summary. Patient names, MRNs, phone numbers and entry titles are removed (patients become \"Patient 1\", \"Patient 2\"), but free-text answers are sent as written. Use \"What will be sent?\" to check. Only continue if your data policy allows this.")
             },
             confirmButton = {
                 Button(onClick = {

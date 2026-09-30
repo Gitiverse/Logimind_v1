@@ -35,6 +35,32 @@ object ProcedureAnswer {
         }
     }
 
+    // performedByMe is null when "Did I perform this?" was never answered for the item.
+    data class DetailedItem(val name: String, val performedByMe: Boolean?)
+
+    fun completedItemsDetailed(value: String): List<DetailedItem> {
+        if (!isProcedure(value)) return emptyList()
+        return try {
+            val obj = JSONObject(value)
+            val procedure = obj.optString("procedure")
+            val choicesPerf = obj.optJSONObject("choices_perf")
+            val choices = obj.optString("choices", "").split(",").filter { it.isNotBlank() }
+            when {
+                choicesPerf != null -> {
+                    val names = choices.ifEmpty { choicesPerf.keys().asSequence().toList() }
+                    names.map { DetailedItem("$procedure: $it", if (choicesPerf.has(it)) choicesPerf.optBoolean(it) else null) }
+                }
+                obj.optBoolean("completed", false) -> {
+                    val name = if (choices.isNotEmpty()) "$procedure: ${choices.joinToString(",")}" else procedure
+                    listOf(DetailedItem(name, if (obj.has("performedByMe")) obj.optBoolean("performedByMe") else null))
+                }
+                else -> emptyList()
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     // Value for entry_answers.performedByMe: true if any completed item was performed by me.
     fun performedByMe(value: String): Boolean? {
         val items = completedItems(value)

@@ -218,6 +218,30 @@ class FormBuilderViewModel(private val repository: FormRepository, private val c
         prefs().edit().putString(PREF_THEME_MODE, mode.name).apply()
     }
 
+    // --- AI summary ---
+    private val _geminiModel = MutableStateFlow(
+        prefs().getString(PREF_GEMINI_MODEL, null) ?: com.example.data.service.AiSummaryService.MODEL_FAST
+    )
+    val geminiModel: StateFlow<String> = _geminiModel.asStateFlow()
+
+    fun setGeminiModel(model: String) {
+        _geminiModel.value = model
+        com.example.data.service.AiSummaryService.geminiModel = model
+        prefs().edit().putString(PREF_GEMINI_MODEL, model).apply()
+    }
+
+    // Structured, de-identified input for the summary (template order, visible questions only).
+    suspend fun buildSummaryInput(
+        entries: List<FormEntry>,
+        purpose: com.example.data.service.SummaryPurpose
+    ): com.example.data.service.SummaryInput = com.example.data.service.SummaryInputBuilder.build(
+        purpose = purpose,
+        entries = entries,
+        sections = repository.getAllSections(),
+        fields = repository.getAllFields(),
+        patients = repository.allPatients.first()
+    )
+
     // --- Pinned templates (shown first when starting a new entry) ---
     private val _pinnedTemplates = MutableStateFlow(prefs().getStringSet(PREF_PINNED_TEMPLATES, emptySet())?.toSet() ?: emptySet())
     val pinnedTemplates: StateFlow<Set<String>> = _pinnedTemplates.asStateFlow()
@@ -274,6 +298,7 @@ class FormBuilderViewModel(private val repository: FormRepository, private val c
             }
             // Load saved Gemini API key for AiSummaryService
             com.example.data.service.AiSummaryService.customApiKey = getGeminiApiKey()
+            com.example.data.service.AiSummaryService.geminiModel = _geminiModel.value
             writeAutoBackupIfDue()
             refreshBackupReminder()
         }
@@ -1389,6 +1414,7 @@ class FormBuilderViewModel(private val repository: FormRepository, private val c
         private const val PREF_INTAKE_FIELDS = "intake_fields_v1"
         private const val PREF_SAFETY_BACKUP_DONE = "safety_backup_done_v2"
         private const val PREF_THEME_MODE = "theme_mode"
+        private const val PREF_GEMINI_MODEL = "gemini_model"
         private const val PREF_PINNED_TEMPLATES = "pinned_templates"
         private const val PREF_APP_LOCK = "app_lock_enabled"
         private const val PREF_LAST_MANUAL_EXPORT = "last_manual_export"
