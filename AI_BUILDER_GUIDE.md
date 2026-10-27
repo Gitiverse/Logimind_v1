@@ -1,5 +1,7 @@
 # LogiMind (Logapp_android) — Guide for AI Builders
 
+> **Development log.** Issues listed below are historical and tracked as they were fixed; see the status notes for what's done.
+
 Audit date: 2026-09-30 · Commit audited: `2b28f0a` (branch `main`)
 
 Coverage: every logic and screen file read in full (data layer, ViewModel, services, `MainActivity`, `HomeScreen`, `FormSolveScreen`, `TemplateDesignerScreen`), plus build files, manifest and backup rules; theme files and `EmptyStateCard` skimmed. Static review only — the app was **not** built or run; verify each fix on a device.
